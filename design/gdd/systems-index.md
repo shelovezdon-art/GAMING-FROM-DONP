@@ -71,3 +71,6 @@ What actually blocks work now (`football-core.md` § OPEN-DECISIONS):
 `AWHoops` (14 modules — a substantially built basketball core, far beyond "not yet
 specced" below), `AWSoccer` (7 modules), `AWMotion` (shared animation arbitration,
 which Football Core depends on), and the `AWSessions` registry.
+| Broadcast UI (score bug, lower thirds) | UI | `football-broadcast-ui.md` | Designed 2026-11-02, pass 1 queued |
+| Cosmetics & DRIP STORE economy | Meta | `cosmetics.md` | Designed 2026-11-02, MVP cut pending owner |
+| Feel upgrades (RAC, DB risk, wiring) | Football | `football-feel-upgrades.md` | Keystones shipped 2026-11-02 |
