@@ -10,6 +10,7 @@ Design order: Foundation → Core → Feature → Presentation → Polish
 |---|---|---|---|---|
 | Football ruleset + ball physics | [football-ruleset.md](football-ruleset.md) | Foundation | RESEARCHED 2026-11-02 — IFAF 5v5 base with a labelled contact deviation; 7 owner decisions open |
 | Football Core (Practice Field) | [football-core.md](football-core.md) | Core | DRAFT 1 — open decisions pending | Movement, ball states, passing/catching, tackling, jump balls, 1v1 AI QB, route practice. Server-authoritative. Built in 5 stages. |
+| Football Playbook + Play-Call Screen | [football-playbook.md](football-playbook.md) | Feature | DESIGN DRAFT 1 — 2026-11-02, not built | 15-play / 6-category 5v5 book (+6-play 2v2), 4 new routes (out, dig, comeback, sluggo), Madden-style lower-third card screen for the QB with route trees drawn per card. Keeps the `{ action="play", index }` wire format; playbook data moves into `AWFootball.Config.playbook` (pays down debt C1). |
 
 ## Not yet specced
 

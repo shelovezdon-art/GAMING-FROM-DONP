@@ -815,6 +815,29 @@ function G:baseSpeed(a)
 	return a.kind == "ai" and M.cpuDbSpeed or M.dbSpeed
 end
 
+-- Sprint (2026-11-02): +CFG.sprint.mult while held, draining a small stamina tank; empty locks out until
+-- minToStart recovers. Humans toggle via the "sprint" intent (burst key); AI sprints in the same situations a
+-- player would — carrying the ball, or pursuing the carrier — so the fairness pillar holds.
+function G:sprintStep(a, dt)
+	local K = CFG.sprint
+	if not K then return 1 end
+	a.stamina = a.stamina or K.staminaMax
+	local on
+	if a.kind == "ai" then
+		on = self.state == "live" and (self.carrier == a or (self.phase == "run" and a.team ~= self.offense))
+	else
+		on = a.st.sprintOn == true and self.state == "live"
+	end
+	if a.sprintLock and a.stamina >= K.minToStart then a.sprintLock = nil end
+	if on and not a.sprintLock and a.stamina > 0 then
+		a.stamina = math.max(0, a.stamina - dt * K.drainRate)
+		if a.stamina <= 0 then a.sprintLock = true end
+		return K.mult
+	end
+	a.stamina = math.min(K.staminaMax, a.stamina + dt * K.recoverRate)
+	return 1
+end
+
 function G:steer(a, x, z, speed) a.wantX, a.wantZ, a.wantSpeed = x, z, speed end
 function G:hold(a) a.wantX = nil end
 
@@ -830,7 +853,7 @@ function G:aiStep(a, dt)
 		local x, z = self:pos(a)
 		local dx, dz = a.wantX - x, a.wantZ - z
 		local d = math.sqrt(dx * dx + dz * dz)
-		if d > 0.3 then dir = Vector3.new(dx / d, 0, dz / d); speed = math.min(a.wantSpeed, self:baseSpeed(a) > 0 and a.wantSpeed or 0) * self:mult(a) end
+		if d > 0.3 then dir = Vector3.new(dx / d, 0, dz / d); speed = math.min(a.wantSpeed, self:baseSpeed(a) > 0 and a.wantSpeed or 0) * self:mult(a) * self:sprintStep(a, dt) end -- * sprintStep added 2026-11-02
 	end
 	a.hum.WalkSpeed = math.max(speed * S, 0.01)
 	a.hum:Move(dir)
@@ -939,7 +962,7 @@ function G:update(dt)
 	end
 	for _, a in ipairs(self:athletes()) do
 		if a.kind == "ai" then self:aiStep(a, dt)
-		else a.hum.WalkSpeed = self:baseSpeed(a) * self:mult(a) * S end
+		else a.hum.WalkSpeed = self:baseSpeed(a) * self:mult(a) * self:sprintStep(a, dt) * S end -- * sprintStep added 2026-11-02
 	end
 	self.hudTimer = (self.hudTimer or 0) - dt
 	if self.hudTimer <= 0 then self.hudTimer = 0.1; self:sendHud() end
@@ -1641,6 +1664,7 @@ function G:sendHud()
 				cooldowns = (self.carrier == a) and { { "JUKE", ready(a.st.jukeCd) }, { "SPIN", ready(a.st.spinCd) }, { "ARM", ready(a.st.stiffCd) } }
 					or ((not mine) and { { "TACKLE", 1 - clamp((a.st.tackleCd - self.now) / T.cooldown, 0, 1) } } or {}),
 				rushIn = (not mine and a.slot == 1 and self.state == "live") and math.max(0, (self.rushAt or 0) - self.now) or nil,
+				sprint = CFG.sprint and { on = a.st.sprintOn == true and not a.sprintLock, stamina = a.stamina or CFG.sprint.staminaMax, max = CFG.sprint.staminaMax } or nil,
 			})
 		end
 	end
@@ -1663,6 +1687,7 @@ function G:intent(player, d)
 	if act == "declareTry" and self.try and self.try.phase == "declare" and a.team == self.try.team then
 		self:declareTry(tonumber(d.declared) == 2 and 2 or 1); return
 	end
+	if act == "sprint" then a.st.sprintOn = d.on == true; return end -- burst key held/released (2026-11-02)
 	if self.state == "preSnap" then
 		if act == "play" and isQB then
 			local i = tonumber(d.index)

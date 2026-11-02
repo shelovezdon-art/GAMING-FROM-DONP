@@ -204,6 +204,9 @@ local Config = {
 	move = { wrSpeed = 9.6, dbSpeed = 9.3, cpuWrSpeed = 9.1, cpuDbSpeed = 9.25, carrySpeed = 9.0, jukeSpeed = 12.5,
 		jukeTime = 0.22, jukeCooldown = 1.1, spinTime = 0.42, spinCooldown = 1.6, spinSpeed = 6.5, stiffArmReach = 1.6,
 		stiffArmStun = 0.7, stiffArmCooldown = 1.4 },
+	-- Sprint (owner feature, 2026-11-02): hold the burst key for +15%, on a short stamina tank so it's a decision,
+	-- not a default. Same rules for AI (carrier + pursuit sprint). Locks out at empty until minToStart recovers.
+	sprint = { mult = 1.15, staminaMax = 3.0, drainRate = 1.0, recoverRate = 0.6, minToStart = 0.8 },
 	ai = { cpuJukeChance = 0.5, cpuTackleAngleError = 0.5 },
 	-- Stance, snap and release: both sides get the same timing windows off the same HUT. Moving early is a penalty.
 	stance = { cadenceMin = 0.9, cadenceMax = 2.2, perfect = 0.15, good = 0.35, autoRelease = 0.6,
