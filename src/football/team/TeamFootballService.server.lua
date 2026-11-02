@@ -605,3 +605,603 @@ function G:startGame()
 	self.halfOpeningOffense = "home"
 	self.lobbySince = nil
 	for _, team in ipairs({ "home", "away" }) do
+		for s = 1, self.size do
+			local r = self.roster[team][s]
+			local a = r and self:humanAthlete(r.player, team, s) or nil
+			if a then self.slots[team][s] = a
+			else
+				if r then self.roster[team][s] = nil; PLAYER_GAME[r.player] = nil end
+				self:fillAI(team, s)
+			end
+		end
+	end
+	for _, a in ipairs(self:athletes()) do
+		self:sendTo(a, { kind = "start", mode = self.mode, team = a.team, slot = a.slot, fieldId = self.id,
+			field = { label = self.field.label, cx = self.field.cx * S, halfW = self.field.halfW * S, floorY = self.field.floorY * S,
+				northGoal = self.field.northGoal * S, southGoal = self.field.southGoal * S },
+			plays = self:playNames(), playbook = self:playBook() })
+	end
+	self.offense = "home"
+	self:newPossession(self.mode .. " KICKOFF · " .. self.field.label .. " · HOME ball first")
+	self:updateBoard()
+end
+
+function G:playNames() local t = {}; for i, p in ipairs(self.plays) do t[i] = p.name end; return t end
+-- names + route assignments, for the client play-call dashboard (owner: "show what each player does", 2026-11-02)
+function G:playBook() local t = {}; for i, p in ipairs(self.plays) do t[i] = { name = p.name, routes = p.routes, cat = p.cat or "PASS", run = p.run } end; return t end -- cat/run added for the PASS|RUN tabs (FEEDBACK WAVE 3)
+
+function G:reset()
+	for _, a in ipairs(self:athletes()) do
+		if a.kind == "human" then self:releaseHuman(a, true) else self:parkAI(a) end
+	end
+	for _, team in ipairs({ "home", "away" }) do for s = 1, self.size do local r = self.roster[team][s]; if r then PLAYER_GAME[r.player] = nil end end end
+	for _, p in ipairs(self.pending) do PLAYER_GAME[p.player] = nil; State:FireClient(p.player, { kind = "end" }) end
+	self.roster = { home = {}, away = {} }; self.slots = { home = {}, away = {} }; self.pending = {}
+	self.state = "lobby"; self.lobbySince = nil; self.ball = nil; self.carrier = nil; self.wrap = nil
+	self.score = { home = 0, away = 0 }
+	self:updateBoard()
+end
+
+-- after a final: everyone goes back to the lobby with the same roster (rematch with one tap)
+function G:backToLobby()
+	for _, a in ipairs(self:athletes()) do
+		if a.kind == "human" then
+			self:releaseHuman(a, false)
+			local pad = self.model:FindFirstChild("JoinPads") and self.model.JoinPads:FindFirstChild("Join_" .. TEAMNAME[a.team])
+			if pad and a.hum.Health > 0 then a.model:PivotTo(CFrame.new(pad.Position + Vector3.new(0, a.hum.HipHeight + a.hrp.Size.Y / 2 + 0.5, 0))) end
+		else self:parkAI(a) end
+	end
+	for _, p in ipairs(self.pending) do
+		local s = self:firstOpen(p.team)
+		if s then self.roster[p.team][s] = { player = p.player, ready = false } else PLAYER_GAME[p.player] = nil end
+	end
+	self.pending = {}
+	for _, team in ipairs({ "home", "away" }) do for s = 1, self.size do local r = self.roster[team][s]; if r then r.ready = false end end end
+	self.state = "lobby"; self.lobbySince = self.now; self.ball = nil; self.carrier = nil; self.wrap = nil
+	for _, p in ipairs(self:audience()) do State:FireClient(p, { kind = "backToLobby", score = self.score }) end
+	if self:humanCount() == 0 then self:reset() else self:sendLobby() end
+	self:updateBoard()
+end
+
+function G:yards(n) return n * self.field.metresPerYard end
+function G:goalZ() return self.dir < 0 and self.field.northGoal or self.field.southGoal end
+function G:ownGoalZ() return self.dir < 0 and self.field.southGoal or self.field.northGoal end
+function G:scoredAt(z) return (z - self:goalZ()) * self.dir >= 0 end
+function G:inOwnEndZone(z) return (z - self:ownGoalZ()) * self.dir < 0 end
+
+function G:newPossession(text)
+	self.dir = self.offense == "home" and -1 or 1
+	self.down = 1
+	self.try = nil; self.tryActive = nil
+	self.los = self:ownGoalZ() + self.dir * self:yards(CFG.rules.startYard) -- was TC.startYard
+	self.toGain = self.field.mid
+	self:setupDown(text)
+end
+
+function G:downText()
+	if self.tryActive then return "TRY FOR " .. tostring(self.try and self.try.declared or 1) .. " · " .. TEAMNAME[self.offense] end
+	local ord = ({ "1st", "2nd", "3rd", "4th" })[self.down] or "4th"
+	local goalNext = math.abs(self.toGain - self:goalZ()) < 0.01
+	-- IFAF 5v5: one line to gain (midfield), then goal — was "& <yds>", which implied first downs that don't exist (2026-11-02)
+	return ord .. " & " .. (goalNext and "GOAL" or "TO MIDFIELD") .. " · " .. TEAMNAME[self.offense] .. " BALL"
+end
+
+-- seat queued players in AI slots (dead ball only)
+function G:seatPending()
+	local still = {}
+	for _, p in ipairs(self.pending) do
+		local seated = false
+		local order = { 1, 2, 3, 4, 5 }
+		for _, s in ipairs(order) do
+			if s <= self.size and not self.roster[p.team][s] then
+				local prev = self.slots[p.team][s]
+				local a = self:humanAthlete(p.player, p.team, s)
+				if a then
+					if prev and prev.kind == "ai" then self:parkAI(prev) end
+					self.slots[p.team][s] = a
+					self.roster[p.team][s] = { player = p.player, ready = true }
+					self:sendTo(a, { kind = "start", mode = self.mode, team = p.team, slot = s, fieldId = self.id,
+						field = { label = self.field.label, cx = self.field.cx * S, halfW = self.field.halfW * S, floorY = self.field.floorY * S,
+							northGoal = self.field.northGoal * S, southGoal = self.field.southGoal * S }, plays = self:playNames(), playbook = self:playBook() })
+					self:fb(a, "YOU'RE IN · " .. TEAMNAME[p.team] .. " · " .. self.roles.off[s] .. " / " .. self.roles.def[s], "good", 2)
+					seated = true
+				end
+				break
+			end
+		end
+		if not seated then table.insert(still, p) end
+	end
+	self.pending = still
+end
+
+function G:setupDown(text)
+	self:seatPending()
+	local f, dir = self.field, self.dir
+	self.state = "preSnap"; self.phase = "pre"; self.playClock = 0
+	self.carrier = nil; self.wrap = nil; self.highBall = false; self.snapAt = nil; self.rushAt = nil; self.passCaught = nil
+	self.pumpUsed = nil; self.aiPumpRolled = nil; self.aiPumpAt = nil; self.breakawayFired = nil -- FEATURE WAVE 2 per-play flags
+	self.handoffAt = nil -- FEEDBACK WAVE 3: run-play handoff timer
+	local faceDown = dir < 0 and math.pi or 0
+	local faceUp = dir < 0 and 0 or math.pi
+	local latSign = dir < 0 and 1 or -1      -- offense's right in world x
+	local off, def = self.offense, other(self.offense)
+	local qb = self.slots[off][1]
+	if qb.kind == "ai" then self.play = math.floor(self.rng:next() * #self.plays) + 1 else self.play = (self.humanPlay and self.humanPlay[off]) or 1 end
+	-- the man over the ball. Only in the 5-man formation: in 1v1 / 2v2 the offense is the QB plus at most one receiver,
+	-- and putting the lone receiver on the ball would be worse presentation than leaving it alone.
+	local snapS = (self.size >= 5) and snapperSlot(self.mode, self.size, f.halfW) or nil
+	self.snapper = nil
+	for s = 1, self.size do
+		local a = self.slots[off][s]
+		a.st = newPlayState()
+		local lat, depth = formation(self.mode, s, f.halfW)
+		local x, z = f.cx + lat * latSign, self.los + dir * depth
+		-- PRESENTATION ONLY: the snapper is placed over the ball instead of on his formation spot, but a.spot below
+		-- stays the FORMATION spot, so his route (assignRoutes reads a.spot), his side, and every gameplay value are
+		-- untouched -- at the snap he simply releases off the ball into the route he was always running.
+		if s == snapS then self:place(a, f.cx, self.los, faceDown); self.snapper = a else self:place(a, x, z, faceDown) end
+		a.spot = { x = x, z = z }
+		a.side = (x - f.cx) >= 0 and 1 or -1
+		if math.abs(x - f.cx) < 0.5 then a.side = latSign end
+		-- was: setPose(a.model, s == 1 and "qbSet" or nil) -- nobody was over the ball, so nothing read as a snap
+		setPose(a.model, s == 1 and "qbSet" or (s == snapS and "snap" or nil))
+		if a.kind == "ai" then a.faceHeading = faceDown end
+	end
+	for s = 1, self.size do
+		local d = self.slots[def][s]
+		d.st = newPlayState()
+		local man = self.slots[off][s]
+		local x, z
+		if s == 1 then x, z = f.cx, self.los + dir * TC.rushDepth
+		elseif self.roles.def[s] == "LB" then x, z = man.spot.x, self.los + dir * 4
+		else x, z = man.spot.x, self.los + dir * TC.cushion end
+		self:place(d, x, z, faceUp)
+		d.man = s == 1 and qb or man
+		setPose(d.model, s == 1 and "rush" or "dbCrouch")
+		if d.kind == "ai" then d.faceHeading = faceUp end
+		self:sendTo(d, { kind = "pedal", on = false })
+	end
+	self:assignRoutes()
+	-- snap count: AI QB runs its own random cadence; a human QB calls SET and HUT himself (auto if he stalls)
+	if qb.kind == "ai" then
+		self.pre = "lineup"; self.snapTimer = CFG.flow.cpuSnapDelay
+	else
+		self.pre = "lineup"; self.snapTimer = TC.humanSnapAuto
+	end
+	-- was: self.ball = { holder = qb, air = false } -- the ball floated in the QB's hand pre-snap and the snap was invisible.
+	-- Now it is SPOTTED on the ground at the middle of the line of scrimmage until G:snap hands it to him.
+	self.ball = { spotted = true, air = false, at = { x = f.cx, z = self.los } }
+	self:msg(text or self:downText(), text and 3.2 or 1.8)
+	self:sendBall()
+	for _, a in ipairs(self:athletes()) do self:sendTo(a, { kind = "camera", yawHeading = a.team == off and faceDown or faceUp }) end
+	self:log("SETUP", { offense = off, los = math.floor(self.los * 10) / 10, play = self.plays[self.play].name })
+end
+
+function G:assignRoutes()
+	local off = self.offense
+	local play = self.plays[self.play]
+	for s = 2, self.size do
+		local a = self.slots[off][s]
+		a.route = a.routeOverride or play.routes[s - 1] or "curl"
+		a.st.routePts = routeWorld(a.route, a.spot.x, a.spot.z, self.dir, a.side)
+		a.st.routeIdx = 1
+		-- FEATURE WAVE 2 (feel-upgrades §3.3.2): double-move routes register their fake-break point in world space
+		local R = ROUTES[a.route]
+		if R and R.doubleMove then
+			local p = R.pts[R.fakeBreakIdx or math.max(#R.pts - 1, 1)]
+			local bx = a.spot.x - a.side * p[1]
+			a.st.fakeBreak = { x = bx, z = a.spot.z + self.dir * p[2], dirx = (bx - a.spot.x) >= 0 and 1 or -1 }
+		else a.st.fakeBreak = nil end
+	end
+end
+
+function G:getSet()
+	self.pre = "set"; self.setAt = self.now
+	local qb = self:qb()
+	if qb.kind == "ai" then self.snapTimer = self.rng:range(CFG.stance.cadenceMin, CFG.stance.cadenceMax)
+	else self.snapTimer = TC.humanSetToSnap end
+	-- was: every slot 2..size went to wrStance -- which wiped the snapper's `snap` pose at SET and stood him up again
+	for s = 2, self.size do
+		local a = self.slots[self.offense][s]
+		if a ~= self.snapper then setPose(a.model, "wrStance") end
+	end
+	self:msg("SET…", 3)
+end
+
+function G:snap()
+	self.clockStarted = true; self.clockStopped = false -- the game clock runs from the first snap, restarts on every snap
+	self.state = "live"; self.phase = "pocket"; self.playClock = 0
+	self.snapAt = self.now
+	self.rushAt = self.now + TC.modes[self.mode].rushCount
+	-- FEEDBACK WAVE 3: on a RUN play, queue the handoff (QB keeper tucks it almost immediately)
+	local runSlot = self.plays[self.play].run
+	self.handoffAt = runSlot and (self.now + (runSlot == 1 and 0.1 or 0.45)) or nil
+	local K = CFG.stance
+	for _, a in ipairs(self:athletes()) do
+		local isQB = a.team == self.offense and a.slot == 1
+		local isRush = a.team ~= self.offense and a.slot == 1
+		if isQB or isRush then
+			a.st.released = true
+			-- was: setPose(a.model, nil, 0.15) -- the QB was left with no pose at all, so the ball hung off one hand
+			if isQB then setPose(a.model, "qbCarry", 0.15) end
+		elseif a.kind == "ai" then
+			a.st.reactAt = self.now + self.rng:range(K.cpuReactMin, K.cpuReactMax)
+		end
+		if a.st.jumped then a.st.frozenUntil = self.now + K.earlyFreeze end
+	end
+	-- THE SNAP: the ball leaves the ground and goes into the QB's hands. This transition IS the snap -- before this wave
+	-- it already sat in his hand from setupDown, so there was nothing to see.
+	local qb = self:qb()
+	self.ball = { holder = qb, air = false }
+	self:sendBall()
+	-- the snapper releases off the ball into his route / block, exactly as he did before
+	if self.snapper and self.snapper.model and self.snapper.model.Parent then setPose(self.snapper.model, nil, 0.15) end
+	self.stats.snaps = (self.stats.snaps or 0) + 1
+	self:msg("HUT!", 0.8)
+	self:log("SNAP", { play = self.plays[self.play].name })
+end
+
+function G:grade(r)
+	local K = CFG.stance
+	if r <= K.perfect then return "PERFECT", K.perfectBurst elseif r <= K.good then return "GOOD", K.goodBurst end
+	return "LATE", 1
+end
+
+function G:release(a, auto)
+	if a.st.released then return end
+	a.st.released = true
+	local g, burst = self:grade(self.now - (self.snapAt or self.now))
+	if auto then g, burst = "LATE", 1 end
+	if a.st.jumped then g, burst = "SLOW", 1 end
+	a.st.burst = burst; a.st.burstUntil = self.now + CFG.stance.burstTime
+	local defense = a.team ~= self.offense
+	if defense then
+		a.st.pedal = true
+		local face = self.dir < 0 and 0 or math.pi
+		setPose(a.model, "pedal", 0.15)
+		if a.kind == "human" then self:sendTo(a, { kind = "pedal", on = true, face = face }) else a.faceHeading = face end
+	else
+		setPose(a.model, nil, 0.15)
+		if a.kind == "ai" then a.faceHeading = nil end
+	end
+	if a.kind == "human" then
+		local label = defense and "GET-OFF" or "RELEASE"
+		if g == "PERFECT" then self:fb(a, "PERFECT " .. label .. "!", "good", 1.0)
+		elseif g == "GOOD" then self:fb(a, "GOOD " .. label, "good", 0.8)
+		elseif g == "SLOW" then self:fb(a, "JUMPED THE SNAP · SLOW START", "bad", 1.0)
+		else self:fb(a, "LATE " .. label, "neutral", 0.7) end
+	end
+	self:log("RELEASE", { who = a.team .. a.slot, grade = g })
+end
+
+function G:flip(a, beaten)
+	if not a.st.pedal then return end
+	a.st.pedal = false
+	a.st.flipUntil = self.now + (beaten and CFG.pedal.beatenStumble or CFG.pedal.flipTime)
+	-- was: setPose(a.model, nil, 0.12) -- THE DB-STANCE HOLE. From the hip flip onward a covering defender had NO pose
+	-- at all and ran the stock animation, which is the "standing around" the owner saw. Give him a ready stance; it
+	-- fades out on its own as he opens up and runs (AWMotion.STANCE_FADE["football:cover"]).
+	setPose(a.model, "cover", 0.12)
+	a.st.coverPose = true
+	if a.kind == "human" then
+		self:sendTo(a, { kind = "pedal", on = false })
+		if beaten then self:fb(a, "BEATEN · FLIP YOUR HIPS EARLIER", "bad", 1.0) end
+	else
+		a.faceHeading = nil
+		if beaten and a.man then self:fb(a.man, "YOU BEAT HIM DEEP!", "good", 1.0) end
+	end
+end
+
+function G:falseStart(a)
+	local f = self.field
+	self.los = clamp(self.los - self.dir * self:yards(CFG.stance.falseStartYards), f.northGoal + 1, f.southGoal - 1)
+	self:log("FALSE_START", { who = a.team .. a.slot })
+	if (Rules.clockStops("penalty", self.halfClock or 1e9, CFG)) then self.clockStopped = true end
+	self:setupDown("FALSE START · " .. (a.kind == "human" and a.name or "AI") .. " · −" .. CFG.stance.falseStartYards .. " yds · replay the down")
+end
+
+-------------------------------------------------------------------------------------------------- movement
+function G:mult(a)
+	local st, n = a.st, self.now
+	if n < st.frozenUntil or n < st.stunUntil then return 0 end
+	local m = 1
+	if n < st.recoverUntil then m *= 0.25 end
+	if n < st.burstUntil then m *= st.burst end
+	if n < st.flipUntil then m *= 0.45 end
+	if n < (st.biteUntil or 0) then m *= (CFG.defend.biteSlowMult or 0.8) end -- bit on a fake (feel-upgrades §3.3.2)
+	if n < st.dragUntil then m *= 0.35 end
+	if n < st.engagedUntil then m *= TC.engagedScale end
+	return m
+end
+
+function G:baseSpeed(a)
+	local M = CFG.move
+	if self.state ~= "live" then return 0 end
+	if a.team == self.offense then
+		if self.carrier == a then return a.kind == "ai" and M.carrySpeed * 0.97 or M.carrySpeed end
+		if a.slot == 1 and self.ball and self.ball.holder == a and self.phase == "pocket" then return TC.qbPocketSpeed end
+		if not a.st.released then return 0 end
+		return a.kind == "ai" and M.cpuWrSpeed or M.wrSpeed
+	end
+	if a.slot == 1 then
+		if self.now < (self.rushAt or 0) then return a.kind == "ai" and 4 or 0 end -- was 0 for both: the AI rusher now roams the line pre-count (FEEDBACK WAVE 3); humans stay held until the count
+		return a.kind == "ai" and M.cpuDbSpeed or M.dbSpeed
+	end
+	if not a.st.released then return 0 end
+	if a.st.pedal then return CFG.pedal.speed end
+	return a.kind == "ai" and M.cpuDbSpeed or M.dbSpeed
+end
+
+-- Ankle-breaker (owner: "jukes should give some type of space", 2026-11-02): when the carrier jukes or spins,
+-- any defender inside jukeBreakRadius who was CLOSING at >= jukeBreakClosingMps bites the move and freezes —
+-- that freeze plus the juke burst is the separation. A defender sitting in position never bites: patience beats
+-- juke-spam. Same rule for AI carriers breaking human defenders. Both sides hear why.
+function G:ankleBreak(a, freezeS)
+	local M = CFG.move
+	if not freezeS or freezeS <= 0 then return end
+	local x, z = self:pos(a)
+	local sentBadge = false -- one ANKLE BREAKER badge per move, however many defenders bit (FEEDBACK WAVE 3)
+	for _, d in ipairs(self:defenders()) do
+		local dx, dz = self:pos(d)
+		if dist2(x, z, dx, dz) <= (M.jukeBreakRadius or 0) then
+			local vx, vz = self:vel(d)
+			local toX, toZ = x - dx, z - dz
+			local l = math.max(math.sqrt(toX * toX + toZ * toZ), 0.01)
+			if (vx * toX + vz * toZ) / l >= (M.jukeBreakClosingMps or 2) then
+				d.st.frozenUntil = math.max(d.st.frozenUntil or 0, self.now + freezeS)
+				d.st.lunge = nil
+				-- FEEDBACK WAVE 3: the bitten defender buckles (AWMotion football:collapse) for the freeze, then clears
+				setPose(d.model, "collapse", 0.08)
+				task.delay(freezeS, function() if d.model and d.model.Parent then setPose(d.model, nil, 0.2) end end)
+				self:fb(d, "ANKLES · HE CUT BACK", "bad", 1.1, "bit on the move and froze")
+				self:fb(a, "BROKE HIM OFF", "good", 1.0)
+				if not sentBadge then
+					sentBadge = true; self:sendTo(a, { kind = "badge", text = "ANKLE BREAKER", tone = "gold" })
+					if a.kind == "human" then awDripFire({ ev = "ankleBreaker", player = a.player }) end -- AW DRIP (2026-11-02)
+				end
+				self:log("ANKLE_BREAK", { by = a.team .. a.slot, on = d.team .. d.slot })
+			end
+		end
+	end
+end
+
+-- Sprint (2026-11-02): +CFG.sprint.mult while held, draining a small stamina tank; empty locks out until
+-- minToStart recovers. Humans toggle via the "sprint" intent (burst key); AI sprints in the same situations a
+-- player would — carrying the ball, or pursuing the carrier — so the fairness pillar holds.
+function G:sprintStep(a, dt)
+	local K = CFG.sprint
+	if not K then return 1 end
+	a.stamina = a.stamina or K.staminaMax
+	local on
+	if a.kind == "ai" then
+		on = self.state == "live" and (self.carrier == a or (self.phase == "run" and a.team ~= self.offense))
+	else
+		on = a.st.sprintOn == true and self.state == "live"
+	end
+	if a.sprintLock and a.stamina >= K.minToStart then a.sprintLock = nil end
+	if on and not a.sprintLock and a.stamina > 0 then
+		a.stamina = math.max(0, a.stamina - dt * K.drainRate)
+		if a.stamina <= 0 then a.sprintLock = true end
+		return K.mult
+	end
+	a.stamina = math.min(K.staminaMax, a.stamina + dt * K.recoverRate)
+	return 1
+end
+
+function G:steer(a, x, z, speed) a.wantX, a.wantZ, a.wantSpeed = x, z, speed end
+function G:hold(a) a.wantX = nil end
+
+function G:aiStep(a, dt)
+	local st = a.st
+	local dir, speed = Vector3.zero, 0
+	if st.lunge and self.now < st.lunge.untilT then
+		dir, speed = st.lunge.dir, st.lunge.speed
+	elseif st.lunge then
+		if st.lunge.kind == "tackle" and self.state == "live" then st.recoverUntil = math.max(st.recoverUntil, self.now + CFG.tackle.whiffRecovery) end
+		st.lunge = nil
+	elseif a.wantX and self.state == "live" then
+		local x, z = self:pos(a)
+		local dx, dz = a.wantX - x, a.wantZ - z
+		local d = math.sqrt(dx * dx + dz * dz)
+		if d > 0.3 then dir = Vector3.new(dx / d, 0, dz / d); speed = math.min(a.wantSpeed, self:baseSpeed(a) > 0 and a.wantSpeed or 0) * self:mult(a) * self:sprintStep(a, dt) end -- * sprintStep added 2026-11-02
+	end
+	a.hum.WalkSpeed = math.max(speed * S, 0.01)
+	a.hum:Move(dir)
+	if a.faceHeading and not (st.lunge) then
+		a.hum.AutoRotate = false
+		local p = a.hrp.Position
+		a.hrp.CFrame = CFrame.lookAt(p, p + Vector3.new(math.sin(a.faceHeading), 0, math.cos(a.faceHeading)))
+	else
+		a.hum.AutoRotate = true
+	end
+	local v = a.hrp.AssemblyLinearVelocity
+	local flat = Vector3.new(v.X, 0, v.Z)
+	local sp = flat.Magnitude / S
+	if a.tracks then
+		-- was: binary idle<->run at sp>1.0 m/s with run:AdjustSpeed(math.clamp(sp * S / 16, 0.8, 2.2) * (backpedal and -0.8 or 1)) (2026-11-02)
+		local backward = flat.Magnitude > 1e-4 and flat.Unit:Dot(a.hrp.CFrame.LookVector) < -0.3
+		AWMotion.locomote(a.tracks, flat.Magnitude, backward, st)
+	end
+end
+
+function G:lungeAI(a, dirX, dirZ, speed, time, kind)
+	a.st.lunge = { dir = Vector3.new(dirX, 0, dirZ).Unit, speed = speed, untilT = self.now + time, kind = kind }
+	a.faceHeading = nil
+	local p = a.hrp.Position
+	a.hrp.CFrame = CFrame.lookAt(p, p + Vector3.new(dirX, 0, dirZ))
+end
+
+-------------------------------------------------------------------------------------------------- helpers
+function G:defenders() local t = {}; for s = 1, self.size do local d = self.slots[other(self.offense)][s]; if d then table.insert(t, d) end end; return t end
+function G:receivers() local t = {}; for s = 2, self.size do local r = self.slots[self.offense][s]; if r then table.insert(t, r) end end; return t end
+function G:nearestDefender(x, z, except)
+	local best, bd
+	for _, d in ipairs(self:defenders()) do
+		if d ~= except then
+			local dx, dz = self:pos(d)
+			local dd = dist2(x, z, dx, dz)
+			if not bd or dd < bd then best, bd = d, dd end
+		end
+	end
+	return best, bd or math.huge
+end
+function G:separation(r)
+	local x, z = self:pos(r)
+	local _, d = self:nearestDefender(x, z, self:rusher())
+	return d
+end
+function G:coverOf(r) for _, d in ipairs(self:defenders()) do if d.man == r then return d end end return nil end
+
+-- FEATURE WAVE 2 (feel-upgrades §3.3.2): the bite cost — beaten stumble + ×biteSlowMult for biteSlowS.
+-- biteUntil is its own field (not dragUntil/recoverUntil) because breakWrap zeroes dragUntil and tackles own
+-- recoverUntil: reusing either would let an unrelated event erase or inflate the price.
+function G:biteCost(d, text)
+	if d.st.pedal then self:flip(d, true)
+	else d.st.flipUntil = math.max(d.st.flipUntil or 0, self.now + CFG.pedal.beatenStumble) end
+	d.st.biteUntil = self.now + (CFG.defend.biteSlowS or 1.0)
+	self:fb(d, text, "bad", 1.4, "committed to the fake")
+end
+
+-- FEATURE WAVE 2 (feel-upgrades §3.3.2): double-move bite detection. When a receiver on a doubleMove route
+-- passes his fake-break point going vertical, a DB moving laterally the fake way within cushion range inside a
+-- 0.6 s window is "beaten by bite". Geometric, so it works identically for human and AI on both sides.
+function G:updateDoubleMoves()
+	if not (self.phase == "pocket" or self.phase == "flight") then return end
+	for _, a in ipairs(self:receivers()) do
+		local st = a.st
+		if st.fakeBreak and not st.biteDone then
+			local x, z = self:pos(a)
+			if (z - st.fakeBreak.z) * self.dir > 0.3 then
+				st.biteWindowUntil = st.biteWindowUntil or (self.now + 0.6)
+				if self.now > st.biteWindowUntil then st.biteDone = true
+				else
+					local d = self:coverOf(a)
+					if d then
+						local dvx = (self:vel(d))
+						local dx, dz = self:pos(d)
+						if dvx * st.fakeBreak.dirx >= 2 and dist2(x, z, dx, dz) <= TC.cushion + 2 then
+							st.biteDone = true
+							self:biteCost(d, "BIT ON THE SLANT · SLUGGO!")
+							self:fb(a, "YOU SOLD IT — HE BIT", "good", 1.2)
+							local qb = self:qb()
+							if qb and qb ~= a then self:fb(qb, "HE BIT — THROW IT DEEP", "good", 1.2, "double move won") end
+							self:log("BITE", { db = d.team .. d.slot, on = a.team .. a.slot, route = a.route })
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-------------------------------------------------------------------------------------------------- per tick
+function G:update(dt)
+	self.now += dt
+	if self.messageTimer then self.messageTimer -= dt; if self.messageTimer <= 0 and self.state ~= "final" then self.message = nil; self.messageTimer = nil end end
+	for p, f in pairs(self.feedbackFor) do f.t -= dt; if f.t <= 0 then self.feedbackFor[p] = nil end end
+	if self.state == "lobby" or self.state == "countdown" then
+		if self.state == "countdown" then
+			self.countdown -= dt
+			if self.countdown <= 0 then self:startGame(); return end
+		elseif self.lobbySince and self:humanCount() > 0 and self.now - self.lobbySince >= TC.lobbyAutoStart then
+			self:startGame(); return
+		end
+		self.lobbyTimer = (self.lobbyTimer or 0) - dt
+		if self.lobbyTimer <= 0 then
+			self.lobbyTimer = 0.5
+			-- players who wandered off leave the lobby
+			for _, team in ipairs({ "home", "away" }) do
+				for s = 1, self.size do
+					local r = self.roster[team][s]
+					local hrp = r and r.player.Character and r.player.Character:FindFirstChild("HumanoidRootPart")
+					if r and (not hrp or dist2(hrp.Position.X / S, hrp.Position.Z / S, self.field.cx, self.field.cz) > self.field.halfL + TC.leaveDistance) then
+						self:leave(r.player); return
+					end
+				end
+			end
+			if self:humanCount() > 0 then self:sendLobby() end
+		end
+		return
+	end
+	-- humans who walked away
+	for _, a in ipairs(self:athletes()) do
+		if a.kind == "human" then
+			local x, z = self:pos(a)
+			if self.now - a.st.placedAt > 2 and dist2(x, z, self.field.cx, self.field.cz) > self.field.halfL + TC.leaveDistance then self:leave(a.player); return end
+		end
+	end
+	-- game clock: paused in OT (untimed shootout), during the try (untimed down) and after a window stop
+	if self.clockStarted and (self.otRound or 0) == 0 and not self.tryActive and self.state ~= "tryDeclare" and self.state ~= "final" then
+		if not self.clockStopped then self.halfClock = math.max(0, (self.halfClock or 0) - dt) end
+	end
+	if self.state == "preSnap" then
+		self.snapTimer -= dt
+		if self.snapTimer <= 0 then
+			if self.pre == "lineup" then self:getSet() else self:snap() end
+		end
+	elseif self.state == "live" then
+		self.playClock += dt
+		self:updateLive(dt)
+	elseif self.state == "tryDeclare" then
+		self.timer -= dt
+		if self.try then self.try.timeLeft = math.max(0, self.timer) end
+		if self.timer <= 0 then self:declareTry(1); return end
+	elseif self.state == "downOver" then
+		self.timer -= dt
+		if self.timer <= 0 then self:advance(); return end
+	elseif self.state == "final" then
+		self.timer -= dt
+		if self.timer <= 0 then self:backToLobby(); return end
+	end
+	for _, a in ipairs(self:athletes()) do
+		if a.kind == "ai" then self:aiStep(a, dt)
+		else a.hum.WalkSpeed = self:baseSpeed(a) * self:mult(a) * self:sprintStep(a, dt) * S end -- * sprintStep added 2026-11-02
+	end
+	self.hudTimer = (self.hudTimer or 0) - dt
+	if self.hudTimer <= 0 then self.hudTimer = 0.1; self:sendHud() end
+end
+
+function G:updateLive(dt)
+	-- releases off the HUT
+	for _, a in ipairs(self:athletes()) do
+		if not a.st.released then
+			if a.kind == "human" and self.now - self.snapAt >= CFG.stance.autoRelease then self:release(a, true)
+			elseif a.kind == "ai" and a.st.reactAt and self.now >= a.st.reactAt then self:release(a, false) end
+		end
+	end
+	self:updatePedals()
+	self:updateDoubleMoves() -- FEATURE WAVE 2: sluggo bite detection (guards its own phases)
+	-- FEEDBACK WAVE 3 (owner: "keep it pass and keep it run"): run plays — the QB hands off once the timer is up.
+	-- passCaught stays nil, so Rules.resolveTry still reads this play as a "run" on a try (a 1-pt try run scores 0).
+	if self.handoffAt and self.phase == "pocket" and self.now >= self.handoffAt then
+		self.handoffAt = nil
+		local qb = self:qb()
+		local slot = self.plays[self.play].run
+		local back = slot and self.slots[self.offense][slot]
+		if back and self.ball and self.ball.holder == qb and not self.ball.air then
+			self.carrier = back; self.phase = "run"
+			-- the two-hand pocket cradle ends at the handoff: he is a runner (keeper) or empty-handed (handoff) now
+			setPose(qb.model, nil, 0.15)
+			if back ~= qb then
+				self.ball = { holder = back, air = false }
+				if back.kind == "ai" then back.faceHeading = nil end
+			end
+			self:msg(back == qb and "QB KEEPER!" or "HANDOFF!", 1.0)
+			self:fb(back, (back == qb and "KEEP IT" or "YOUR BALL") .. " · Q/E juke · C spin · R stiff-arm", "warn", 1.2)
+			self:sendBall()
+			self:log("HANDOFF", { to = self.offense .. tostring(slot), keeper = back == qb or nil })
+		end
+	end
+	if self.phase == "pocket" then self:updatePocket(dt) end
+	if self.ball and self.ball.air then self:updateFlight(dt) end
+	if self.state ~= "live" then return end
+	if self.phase == "run" then self:updateRun(dt) end
+	if self.state ~= "live" then return end
+	if self.wrap then
+		local w = self.wrap
+		if w.by.kind == "human" and w.carrier.kind == "ai" and not w.rolled then
+			w.rolled = true
+			if self.rng:next() < CFG.tackle.cpuBreakChance then w.aiBreaksAt = self.now + 0.15 end
+		end
+		if w.aiBreaksAt and self.now >= w.aiBreaksAt then self:breakWrap("juke")
+		elseif self.now > w.endsAt then self:finishWrap() end
