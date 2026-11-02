@@ -1,4 +1,4 @@
--- MIRROR of ReplicatedStorage.AWFootball.Rules (ModuleScript), pulled 2026-11-02.
+-- MIRROR of game.ReplicatedStorage.AWFootball.Rules (ModuleScript), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
 -- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · Football rules core (pure functions). Luau port of football-rules.js. Units: metres, seconds.
 local Rules = {}
@@ -14,6 +14,17 @@ Rules.ROUTES = {
 	post = { label = "Post", pts = { { 0, 10 }, { 5, 18 }, { 9, 27 } } },
 	fade = { label = "Fade", pts = { { -1, 8 }, { -2.2, 18 }, { -2.8, 30 } } },
 	cross = { label = "Cross", pts = { { 0, 5 }, { 12, 9 }, { 22, 12 } } },
+	-- moved up from TeamFootballService 2026-11-02 so the client play-call dashboard can draw every route
+	-- (the service re-adds identical copies locally; harmless overwrite)
+	flat = { label = "Flat", pts = { { -2, 1 }, { -7, 2.5 }, { -9, 3 } } },
+	wheel = { label = "Wheel", pts = { { -3, 1 }, { -6, 4 }, { -6.5, 20 } } },
+	seam = { label = "Seam", pts = { { 0, 10 }, { 0.5, 26 } } },
+	-- FEATURE WAVE 2 (football-playbook.md §3.3, 2026-11-02): 4 new routes. The GDD writes laterals positive toward
+	-- the SIDELINE; this table is positive toward the MIDDLE (routeWorld: x = startX - side * lat), so signs are negated.
+	out = { label = "Out", pts = { { 0, 7 }, { -6, 7 } } },                       -- speed out at 7 m to the sideline
+	dig = { label = "Dig", pts = { { 0, 10 }, { 8, 10 } } },                      -- square-in at 10 m to the middle
+	comeback = { label = "Comeback", pts = { { 0, 12 }, { -2, 10 } }, settle = true }, -- drive 12, back down to 10 (settle: the AI holds at the break instead of extending backward)
+	sluggo = { label = "Sluggo", pts = { { 2, 4 }, { 2.5, 6 }, { -0.5, 26 } }, doubleMove = true, fakeBreakIdx = 2 }, -- slant-and-go: the double move (feel-upgrades §3.3.2)
 	free = { label = "Free run", pts = {} },
 }
 Rules.ROUTE_ORDER = { "slant", "curl", "post", "fade", "cross" }
@@ -96,8 +107,10 @@ function Rules.resolveCatch(wr, db, cfg, rng, high)
 	local K, D = cfg.catch, cfg.defend
 	-- Config flag, not a rewrite: "deterministic" routes to the no-dice model at the bottom of this file; the
 	-- quality-roll model below is untouched and stays the default until parity is proven.
-	if K.model == "deterministic" then return Rules.resolveCatchDeterministic(wr, db, cfg, high) end
+	-- Jump balls stay a timing DUEL even in deterministic mode: who met the ball at its apex is the whole contest,
+	-- and the deterministic model has no concept of two bodies in the air (reordered 2026-11-02).
 	if high then return Rules.resolveJumpBall(wr, db, cfg, rng) end
+	if K.model == "deterministic" then return Rules.resolveCatchDeterministic(wr, db, cfg, high) end
 	local dbPlay = false
 	if db then
 		if db.human then dbPlay = db.pressed and inWindow(db.timing, K) and db.dist <= D.swatReach

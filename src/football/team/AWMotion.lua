@@ -1,5 +1,5 @@
--- MIRROR of ReplicatedStorage.AWMotion (ModuleScript), pulled 2026-11-02 after the animation QA pass
--- (Motion.locomote added). Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1).
+-- MIRROR of game.ReplicatedStorage.AWMotion (ModuleScript), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
+-- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · AWMotion (ModuleScript in ReplicatedStorage). Shared between client scripts on one machine:
 -- a sport script that poses a character's arms itself (a dribble, a shot) "claims" the arms each frame, and the
 -- athlete motion layer (AthleteMotion) leaves them alone. A football carrier claims "tuckR" so the ball arm tucks
@@ -78,6 +78,10 @@ local FOOTBALL = {
 		LeftHip = CFrame.Angles(rad(22), 0, 0), LeftKnee = CFrame.Angles(rad(-35), 0, 0),
 		RightHip = CFrame.Angles(rad(22), 0, 0), RightKnee = CFrame.Angles(rad(-35), 0, 0),
 		LeftShoulder = CFrame.Angles(rad(20), 0, rad(-15)), RightShoulder = CFrame.Angles(rad(20), 0, rad(15)) },
+	-- hands-up reach as the ball arrives (owner: "put the hands up", 2026-11-02) — thumbs-together high reach,
+	-- set by the server on the target + the contesting DB in the final windowEarly of flight
+	reach = { Waist = CFrame.Angles(rad(6), 0, 0), LeftShoulder = CFrame.Angles(rad(165), 0, rad(-8)), RightShoulder = CFrame.Angles(rad(165), 0, rad(8)),
+		LeftElbow = CFrame.Angles(rad(12), 0, 0), RightElbow = CFrame.Angles(rad(12), 0, 0) },
 	qbSet = { Waist = CFrame.Angles(rad(-8), 0, 0), LeftHip = CFrame.Angles(rad(12), 0, 0), LeftKnee = CFrame.Angles(rad(-20), 0, 0),
 		RightHip = CFrame.Angles(rad(12), 0, 0), RightKnee = CFrame.Angles(rad(-20), 0, 0),
 		LeftShoulder = CFrame.Angles(rad(30), 0, 0), RightShoulder = CFrame.Angles(rad(35), 0, 0), LeftElbow = CFrame.Angles(rad(60), 0, 0), RightElbow = CFrame.Angles(rad(60), 0, 0) },

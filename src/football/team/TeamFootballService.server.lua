@@ -1,5 +1,5 @@
--- MIRROR of ServerScriptService.TeamFootballService (Script), pulled 2026-11-02 after the try-flow,
--- clock and config-unification passes. Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1).
+-- MIRROR of game.ServerScriptService.TeamFootballService (Script), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
+-- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · TeamFootballService (Milestone 06): 2v2 and 5v5 football on the Football Park team fields.
 -- HOME vs AWAY. Friends take slots by pressing E on a team's JOIN pad; the lobby shows the roster, everyone taps READY,
 -- and every empty slot is played by the same team AI on both sides (fair). Late joiners queue and take an AI slot at
@@ -32,6 +32,7 @@ local TC = {
 	readyCountdown = 4, lobbyAutoStart = 40, leaveDistance = 45, humanSnapAuto = 15, humanSetToSnap = 4,
 	qbPocketSpeed = 7.2, lobHold = 0.35, pressureRadius = 2.6, onRunSpeed = 3.5, onRunPenalty = 0.6,
 	blockReach = 1.2, blockDrag = 0.55, blockCooldown = 1.3, engagedScale = 0.4,
+	blockDragSprint = 0.8, pancakeSpeed = 8, -- FEATURE WAVE 2 (feel-upgrades #9): a blocker at ≥ 8 m/s at contact pancakes (drag 0.8 vs 0.55)
 	openSeparation = 2.4, finalTime = 7, downOverTime = 2.4,
 }
 
@@ -74,17 +75,41 @@ local ROLES = {
 	["2v2"] = { off = { "QB", "WR" }, def = { "RUSH", "CB" } },
 	["5v5"] = { off = { "QB", "X", "Z", "SLOT", "RB" }, def = { "RUSH", "CB", "CB", "NICKEL", "LB" } },
 }
+-- FEATURE WAVE 2 (football-playbook.md §3.4–3.5, 2026-11-02): 15-play 5v5 book + 6-play 2v2 book. Route order is
+-- X / Z / SLOT / RB (slots 2..5). The GDD's crossL/crossR mesh pair ships as plain "cross" (mirrored by each
+-- player's side) until mirrored route variants exist. Categories/formations/tryOnly stay design-only for now:
+-- the service's play shape is unchanged ({ name, routes }) and so is the wire format { action = "play", index }.
+-- was: 5 plays per mode — 2v2 SLANT/CURL/POST/FADE/CROSS; 5v5 SPREAD SLANTS { slant,slant,curl,flat },
+-- FOUR VERTS { fade,fade,seam,curl }, MESH { cross,slant,curl,flat }, DEEP SHOT { post,curl,seam,wheel },
+-- QUICK { curl,curl,slant,flat } (2026-11-02)
 local PLAYS = {
 	["2v2"] = {
-		{ name = "SLANT", routes = { "slant" } }, { name = "CURL", routes = { "curl" } }, { name = "POST", routes = { "post" } },
-		{ name = "FADE", routes = { "fade" } }, { name = "CROSS", routes = { "cross" } },
+		{ name = "SLANT", routes = { "slant" } }, { name = "CURL", routes = { "curl" } },
+		{ name = "COMEBACK", routes = { "comeback" } }, { name = "POST", routes = { "post" } },
+		{ name = "SLUGGO", routes = { "sluggo" } }, { name = "GO", routes = { "fade" } },
 	},
 	["5v5"] = {
-		{ name = "SPREAD SLANTS", routes = { "slant", "slant", "curl", "flat" } },
-		{ name = "FOUR VERTS", routes = { "fade", "fade", "seam", "curl" } },
-		{ name = "MESH", routes = { "cross", "slant", "curl", "flat" } },
-		{ name = "DEEP SHOT", routes = { "post", "curl", "seam", "wheel" } },
-		{ name = "QUICK", routes = { "curl", "curl", "slant", "flat" } },
+		-- QUICK
+		{ name = "DOUBLE SLANT", routes = { "slant", "fade", "slant", "flat" } },
+		{ name = "CURL FLAT", routes = { "curl", "curl", "seam", "flat" } },
+		{ name = "QUICK OUTS", routes = { "out", "out", "slant", "flat" } },
+		-- CROSSERS
+		{ name = "MESH RAIL", routes = { "cross", "post", "cross", "wheel" } },
+		{ name = "SHALLOW DIG", routes = { "dig", "fade", "cross", "flat" } },
+		-- VERTS
+		{ name = "FOUR VERTS", routes = { "fade", "fade", "seam", "seam" } },
+		{ name = "SLUGGO SHOT", routes = { "sluggo", "comeback", "dig", "flat" } },
+		{ name = "POST WHEEL", routes = { "curl", "post", "cross", "wheel" } },
+		-- MISDIRECTION
+		{ name = "SWITCH VERTS", routes = { "post", "dig", "wheel", "flat" } },
+		{ name = "JET WHEEL", routes = { "dig", "slant", "wheel", "flat" } },
+		-- GOALLINE
+		{ name = "GOAL FADE", routes = { "fade", "fade", "out", "flat" } },
+		{ name = "UNDER", routes = { "slant", "curl", "slant", "flat" } },
+		-- SPECIALS (try plays by design; callable on any down until tryOnly filtering ships)
+		{ name = "MONEY OUT", routes = { "slant", "fade", "out", "flat" } },
+		{ name = "TEN SHOT", routes = { "dig", "comeback", "seam", "wheel" } },
+		{ name = "RAIL SWING", routes = { "comeback", "post", "cross", "wheel" } },
 	},
 }
 local function formation(mode, slot, halfW)
@@ -212,7 +237,7 @@ local GAMES = {}          -- field id -> game
 local PLAYER_GAME = {}    -- player -> game (lobby, pending or seated)
 
 local function newPlayState()
-	return { released = false, burst = 1, burstUntil = 0, pedal = false, flipUntil = 0, recoverUntil = 0, dragUntil = 0,
+	return { released = false, burst = 1, burstUntil = 0, pedal = false, flipUntil = 0, recoverUntil = 0, dragUntil = 0, biteUntil = 0,
 		frozenUntil = 0, stunUntil = 0, engagedUntil = 0, tackleCd = 0, jukeCd = 0, spinCd = 0, stiffCd = 0, blockCd = 0,
 		immuneUntil = 0, lunge = nil, trail = {}, routePts = {}, routeIdx = 1, jumpAt = nil, catchPress = nil, swatPress = nil,
 		jumped = false, reactAt = nil, flipAt = nil, calledAt = nil, placedAt = 0 }
@@ -543,7 +568,7 @@ function G:startGame()
 		self:sendTo(a, { kind = "start", mode = self.mode, team = a.team, slot = a.slot, fieldId = self.id,
 			field = { label = self.field.label, cx = self.field.cx * S, halfW = self.field.halfW * S, floorY = self.field.floorY * S,
 				northGoal = self.field.northGoal * S, southGoal = self.field.southGoal * S },
-			plays = self:playNames() })
+			plays = self:playNames(), playbook = self:playBook() })
 	end
 	self.offense = "home"
 	self:newPossession(self.mode .. " KICKOFF · " .. self.field.label .. " · HOME ball first")
@@ -551,6 +576,8 @@ function G:startGame()
 end
 
 function G:playNames() local t = {}; for i, p in ipairs(self.plays) do t[i] = p.name end; return t end
+-- names + route assignments, for the client play-call dashboard (owner: "show what each player does", 2026-11-02)
+function G:playBook() local t = {}; for i, p in ipairs(self.plays) do t[i] = { name = p.name, routes = p.routes } end; return t end
 
 function G:reset()
 	for _, a in ipairs(self:athletes()) do
@@ -624,7 +651,7 @@ function G:seatPending()
 					self.roster[p.team][s] = { player = p.player, ready = true }
 					self:sendTo(a, { kind = "start", mode = self.mode, team = p.team, slot = s, fieldId = self.id,
 						field = { label = self.field.label, cx = self.field.cx * S, halfW = self.field.halfW * S, floorY = self.field.floorY * S,
-							northGoal = self.field.northGoal * S, southGoal = self.field.southGoal * S }, plays = self:playNames() })
+							northGoal = self.field.northGoal * S, southGoal = self.field.southGoal * S }, plays = self:playNames(), playbook = self:playBook() })
 					self:fb(a, "YOU'RE IN · " .. TEAMNAME[p.team] .. " · " .. self.roles.off[s] .. " / " .. self.roles.def[s], "good", 2)
 					seated = true
 				end
@@ -641,6 +668,7 @@ function G:setupDown(text)
 	local f, dir = self.field, self.dir
 	self.state = "preSnap"; self.phase = "pre"; self.playClock = 0
 	self.carrier = nil; self.wrap = nil; self.highBall = false; self.snapAt = nil; self.rushAt = nil; self.passCaught = nil
+	self.pumpUsed = nil; self.aiPumpRolled = nil; self.aiPumpAt = nil; self.breakawayFired = nil -- FEATURE WAVE 2 per-play flags
 	local faceDown = dir < 0 and math.pi or 0
 	local faceUp = dir < 0 and 0 or math.pi
 	local latSign = dir < 0 and 1 or -1      -- offense's right in world x
@@ -695,6 +723,13 @@ function G:assignRoutes()
 		a.route = a.routeOverride or play.routes[s - 1] or "curl"
 		a.st.routePts = routeWorld(a.route, a.spot.x, a.spot.z, self.dir, a.side)
 		a.st.routeIdx = 1
+		-- FEATURE WAVE 2 (feel-upgrades §3.3.2): double-move routes register their fake-break point in world space
+		local R = ROUTES[a.route]
+		if R and R.doubleMove then
+			local p = R.pts[R.fakeBreakIdx or math.max(#R.pts - 1, 1)]
+			local bx = a.spot.x - a.side * p[1]
+			a.st.fakeBreak = { x = bx, z = a.spot.z + self.dir * p[2], dirx = (bx - a.spot.x) >= 0 and 1 or -1 }
+		else a.st.fakeBreak = nil end
 	end
 end
 
@@ -792,6 +827,7 @@ function G:mult(a)
 	if n < st.recoverUntil then m *= 0.25 end
 	if n < st.burstUntil then m *= st.burst end
 	if n < st.flipUntil then m *= 0.45 end
+	if n < (st.biteUntil or 0) then m *= (CFG.defend.biteSlowMult or 0.8) end -- bit on a fake (feel-upgrades §3.3.2)
 	if n < st.dragUntil then m *= 0.35 end
 	if n < st.engagedUntil then m *= TC.engagedScale end
 	return m
@@ -813,6 +849,31 @@ function G:baseSpeed(a)
 	if not a.st.released then return 0 end
 	if a.st.pedal then return CFG.pedal.speed end
 	return a.kind == "ai" and M.cpuDbSpeed or M.dbSpeed
+end
+
+-- Ankle-breaker (owner: "jukes should give some type of space", 2026-11-02): when the carrier jukes or spins,
+-- any defender inside jukeBreakRadius who was CLOSING at >= jukeBreakClosingMps bites the move and freezes —
+-- that freeze plus the juke burst is the separation. A defender sitting in position never bites: patience beats
+-- juke-spam. Same rule for AI carriers breaking human defenders. Both sides hear why.
+function G:ankleBreak(a, freezeS)
+	local M = CFG.move
+	if not freezeS or freezeS <= 0 then return end
+	local x, z = self:pos(a)
+	for _, d in ipairs(self:defenders()) do
+		local dx, dz = self:pos(d)
+		if dist2(x, z, dx, dz) <= (M.jukeBreakRadius or 0) then
+			local vx, vz = self:vel(d)
+			local toX, toZ = x - dx, z - dz
+			local l = math.max(math.sqrt(toX * toX + toZ * toZ), 0.01)
+			if (vx * toX + vz * toZ) / l >= (M.jukeBreakClosingMps or 2) then
+				d.st.frozenUntil = math.max(d.st.frozenUntil or 0, self.now + freezeS)
+				d.st.lunge = nil
+				self:fb(d, "ANKLES · HE CUT BACK", "bad", 1.1, "bit on the move and froze")
+				self:fb(a, "BROKE HIM OFF", "good", 1.0)
+				self:log("ANKLE_BREAK", { by = a.team .. a.slot, on = d.team .. d.slot })
+			end
+		end
+	end
 end
 
 -- Sprint (2026-11-02): +CFG.sprint.mult while held, draining a small stamina tank; empty locks out until
@@ -900,6 +961,49 @@ function G:separation(r)
 	local _, d = self:nearestDefender(x, z, self:rusher())
 	return d
 end
+function G:coverOf(r) for _, d in ipairs(self:defenders()) do if d.man == r then return d end end return nil end
+
+-- FEATURE WAVE 2 (feel-upgrades §3.3.2): the bite cost — beaten stumble + ×biteSlowMult for biteSlowS.
+-- biteUntil is its own field (not dragUntil/recoverUntil) because breakWrap zeroes dragUntil and tackles own
+-- recoverUntil: reusing either would let an unrelated event erase or inflate the price.
+function G:biteCost(d, text)
+	if d.st.pedal then self:flip(d, true)
+	else d.st.flipUntil = math.max(d.st.flipUntil or 0, self.now + CFG.pedal.beatenStumble) end
+	d.st.biteUntil = self.now + (CFG.defend.biteSlowS or 1.0)
+	self:fb(d, text, "bad", 1.4, "committed to the fake")
+end
+
+-- FEATURE WAVE 2 (feel-upgrades §3.3.2): double-move bite detection. When a receiver on a doubleMove route
+-- passes his fake-break point going vertical, a DB moving laterally the fake way within cushion range inside a
+-- 0.6 s window is "beaten by bite". Geometric, so it works identically for human and AI on both sides.
+function G:updateDoubleMoves()
+	if not (self.phase == "pocket" or self.phase == "flight") then return end
+	for _, a in ipairs(self:receivers()) do
+		local st = a.st
+		if st.fakeBreak and not st.biteDone then
+			local x, z = self:pos(a)
+			if (z - st.fakeBreak.z) * self.dir > 0.3 then
+				st.biteWindowUntil = st.biteWindowUntil or (self.now + 0.6)
+				if self.now > st.biteWindowUntil then st.biteDone = true
+				else
+					local d = self:coverOf(a)
+					if d then
+						local dvx = (self:vel(d))
+						local dx, dz = self:pos(d)
+						if dvx * st.fakeBreak.dirx >= 2 and dist2(x, z, dx, dz) <= TC.cushion + 2 then
+							st.biteDone = true
+							self:biteCost(d, "BIT ON THE SLANT · SLUGGO!")
+							self:fb(a, "YOU SOLD IT — HE BIT", "good", 1.2)
+							local qb = self:qb()
+							if qb and qb ~= a then self:fb(qb, "HE BIT — THROW IT DEEP", "good", 1.2, "double move won") end
+							self:log("BITE", { db = d.team .. d.slot, on = a.team .. a.slot, route = a.route })
+						end
+					end
+				end
+			end
+		end
+	end
+end
 
 -------------------------------------------------------------------------------------------------- per tick
 function G:update(dt)
@@ -977,6 +1081,7 @@ function G:updateLive(dt)
 		end
 	end
 	self:updatePedals()
+	self:updateDoubleMoves() -- FEATURE WAVE 2: sluggo bite detection (guards its own phases)
 	if self.phase == "pocket" then self:updatePocket(dt) end
 	if self.ball and self.ball.air then self:updateFlight(dt) end
 	if self.state ~= "live" then return end
@@ -1088,11 +1193,51 @@ function G:throwTo(qb, r, lob, rushed)
 	self:sendBall()
 end
 
+-- FEATURE WAVE 2 (feel-upgrades #6): pump fake — the windup pose with no release, once per play. Costs nothing
+-- but pocket time against the rusher's clock. The DB covering the pumped target pays: still pedaling = the fake
+-- flips his hips (beaten stumble); already flipped and closing hard on the target = the full bite cost.
+function G:pumpFake(qb, r)
+	if not (self.ball and self.ball.holder == qb and self.phase == "pocket" and self.state == "live") then return end
+	if self.pumpUsed then return end
+	self.pumpUsed = true
+	setPose(qb.model, "throw", 0.08)
+	task.delay(CFG.qb.pumpPoseS or 0.2, function()
+		if qb.model.Parent and self.state == "live" and self.phase == "pocket" then setPose(qb.model, nil, 0.15) end
+	end)
+	self:fb(qb, "PUMP FAKE", "neutral", 0.8)
+	self:log("PUMP", { by = qb.team .. qb.slot, to = r and (r.team .. r.slot) or nil })
+	local d = r and self:coverOf(r)
+	if d then
+		if d.st.pedal then
+			self:flip(d, true)
+			self:fb(d, "BIT ON THE PUMP", "bad", 1.2, "flipped on the fake")
+			self:fb(qb, "HE BIT — THROW IT DEEP", "good", 1.2, "pump fake bought separation")
+		else
+			local dvx, dvz = self:vel(d)
+			local dx, dz = self:pos(d)
+			local rx, rz = self:pos(r)
+			local l = math.max(dist2(dx, dz, rx, rz), 0.01)
+			local closing = (dvx * (rx - dx) + dvz * (rz - dz)) / l
+			if closing > 3 then
+				self:biteCost(d, "BIT ON THE PUMP")
+				self:fb(qb, "HE BIT — THROW IT DEEP", "good", 1.2, "pump fake bought separation")
+			end
+		end
+	end
+end
+
 function G:updateFlight(dt)
 	local b, f = self.ball, self.field
 	b.airTime += dt
 	local t = math.min(b.airTime, b.flight)
 	local bx = b.from.x + b.vel.x * t
+	-- hands up as the window opens (owner: "put the hands up", 2026-11-02): the target + the contesting DB reach
+	if not b.reachSet and (b.flight - b.airTime) <= (CFG.catch.windowEarly or 0.5) then
+		b.reachSet = true
+		if b.target and b.target.model then setPose(b.target.model, "reach", 0.12) end
+		local nd, ndd = self:nearestDefender(b.aim.x, b.aim.z)
+		if nd and ndd <= CFG.defend.swatReach and nd.model then b.reachDb = nd; setPose(nd.model, "reach", 0.12) end
+	end
 	for _, a in ipairs(self:athletes()) do
 		if a.kind == "ai" and a.st.jumpPlanned and b.airTime >= a.st.jumpPlanned and not a.st.jumpAt then
 			local x, z = self:pos(a)
@@ -1115,8 +1260,21 @@ function G:resolveArrival(forced)
 	local res
 	if forced == "OUT_OF_BOUNDS" then res = { result = "INCOMPLETE", detail = "thrown out of bounds" }
 	else
+		-- arrival geometry (design review #1, 2026-11-02): height, relative speed and facing decide the catch
+		local arrivalYM = (b.from.y + b.vel.y * t - 0.5 * g * t * t) - self.field.floorY
+		local ballV = Vector3.new(b.vel.x, b.vel.y - g * t, b.vel.z)
+		local wvx, wvz = self:vel(wr)
+		local relSpeed = (ballV - Vector3.new(wvx, 0, wvz)).Magnitude
+		local horiz = Vector3.new(ballV.X, 0, ballV.Z)
+		local facingDeg = 0
+		if horiz.Magnitude > 0.1 then
+			facingDeg = math.deg(math.acos(math.clamp(wr.hrp.CFrame.LookVector:Dot(-horiz.Unit), -1, 1)))
+		end
 		local wrIn = { dist = dWR, human = wr.kind == "human", pressed = wr.st.catchPress and wr.st.catchPress.kind or nil,
-			timing = wr.st.catchPress and (wr.st.catchPress.at - b.airTime) or nil }
+			timing = wr.st.catchPress and (wr.st.catchPress.at - b.airTime) or nil,
+			arrivalYM = arrivalYM, relSpeed = relSpeed, facingDeg = facingDeg, overShoulder = facingDeg > 120,
+			contested = db ~= nil and dDB <= CFG.catch.contestRadius,
+			hands = (wr.st.catchPress ~= nil or wr.kind == "ai") and "two" or nil }
 		local dbIn = db and { dist = dDB, human = db.kind == "human", pressed = db.st.swatPress ~= nil,
 			timing = db.st.swatPress and (db.st.swatPress.at - b.airTime) or nil } or nil
 		if self.highBall then
@@ -1130,6 +1288,7 @@ function G:resolveArrival(forced)
 		res = Rules.resolveCatch(wrIn, dbIn, CFG, self.rng, self.highBall)
 	end
 	b.air = false
+	if b.reachSet then setPose(wr.model, nil, 0.15); if b.reachDb and b.reachDb.model then setPose(b.reachDb.model, nil, 0.15) end end
 	-- feedback: receiver, defender, thrower
 	local grade = Rules.catchGrade(wr.st.catchPress and (wr.st.catchPress.at - b.airTime) or nil, CFG)
 	if res.result == "CATCH" then
@@ -1147,12 +1306,32 @@ function G:resolveArrival(forced)
 	else
 		self:fb(wr, grade == "EARLY" and "TOO EARLY" or grade == "LATE" and "TOO LATE" or (res.detail == "thrown out of bounds" and "OVERTHROWN" or "INCOMPLETE"), "bad", 1.0)
 	end
+	-- DB risk/reward (design review 2026-11-02): a wrong guess has a price and a name
+	local D = CFG.defend
+	if res.result == "CATCH" and db then
+		if self.highBall and dDB <= D.swatReach and ((db.kind == "ai" and db.st.jumpAt) or db.st.swatPress) then
+			db.st.stunUntil = math.max(db.st.stunUntil or 0, self.now + (D.jumpStunS or 0))
+			self:fb(db, "JUMPED EARLY · HE WASN'T THERE YET", "bad", 1.2, "mistimed the jump ball")
+		elseif not self.highBall and db.st.swatPress then
+			local dbT = db.st.swatPress.at - b.flight
+			if dbT < -CFG.catch.windowEarly or dbT > CFG.catch.windowLate then
+				db.st.recoverUntil = math.max(db.st.recoverUntil or 0, self.now + (D.pressLockoutS or 0))
+				self:fb(db, "SWUNG EARLY · BALL WASN'T THERE", "bad", 1.2, "swat pressed outside the window")
+			end
+		end
+	elseif (res.result == "INT" or res.result == "SWAT") and self.highBall and (wr.st.catchPress or wr.st.jumpAt) then
+		wr.st.stunUntil = math.max(wr.st.stunUntil or 0, self.now + (D.jumpStunS or 0)) -- the mirror cost: receivers mistime too
+	end
 	self:log("ARRIVAL", { result = res.result, detail = res.detail, dWR = math.floor(dWR * 100) / 100, dDB = math.floor(dDB * 100) / 100, high = self.highBall })
 	if res.result == "CATCH" then
 		self.ball = { holder = wr, air = false }
 		self.passCaught = true -- a completed forward pass: makes this play a "pass" for try legality (Rules.resolveTry)
 		self.carrier = wr; self.phase = "run"
-		wr.st.immuneUntil = self.now + (CFG.catch.runAfterCatch or 0) -- was 0: the catcher was wrapped at the catch point before he could move (owner, 2026-11-02)
+		-- stride-graded run-after-catch (design review 2026-11-02): in-stride = rolling start, aerial = beat + landing
+		local rac = CFG.catch.runAfterCatch or 0
+		if self.highBall then rac = CFG.catch.racAerial or rac
+		elseif self:speedOf(wr) >= (CFG.catch.racStrideMps or 99) then rac = CFG.catch.racRolling or rac end
+		wr.st.immuneUntil = self.now + rac
 		if wr.kind == "ai" then wr.faceHeading = nil end
 		self.stats.catches = (self.stats.catches or 0) + 1
 		self:sendBall()
@@ -1198,6 +1377,19 @@ function G:aiQB(a, dt)
 	local rusher = self:rusher()
 	local pressure = false
 	if rusher and self.now >= (self.rushAt or 0) then local px, pz = self:pos(rusher); pressure = dist2(px, pz, x, z) < TC.pressureRadius + 0.6 end
+	-- FEATURE WAVE 2 (feel-upgrades #6): the AI QB may pump once per play, at low odds, only when clean
+	if not self.pumpUsed and not self.aiPumpRolled then
+		self.aiPumpRolled = true
+		if self.rng:next() < 0.2 then self.aiPumpAt = self.now + self.rng:range(0.3, 0.9) end
+	end
+	if self.aiPumpAt and self.now >= self.aiPumpAt then
+		self.aiPumpAt = nil
+		if not pressure then
+			local rs = self:receivers()
+			local r = rs[math.floor(self.rng:next() * #rs) + 1]
+			if r then self:pumpFake(a, r); return end
+		end
+	end
 	local target
 	if called then target = called
 	elseif best and self.playClock >= Q.minReadTime and self:separation(best) >= TC.openSeparation then target = best
@@ -1223,7 +1415,7 @@ function G:aiReceiver(a)
 	local tgt = pts[math.min(i, #pts)]
 	if dist2(x, z, tgt.x, tgt.z) < 0.8 then
 		if i < #pts then a.st.routeIdx += 1; tgt = pts[a.st.routeIdx]
-		elseif a.route == "curl" then self:hold(a); return
+		elseif a.route == "curl" or (ROUTES[a.route] and ROUTES[a.route].settle) then self:hold(a); return -- settle routes (comeback) hold at the break; extending would run them backward (FEATURE WAVE 2)
 		else
 			local p0 = pts[#pts - 1] or a.spot
 			local dx, dz = tgt.x - p0.x, tgt.z - p0.z
@@ -1248,6 +1440,7 @@ function G:aiCarrier(a)
 			a.st.jukeCd = self.now + M.jukeCooldown
 			a.st.immuneUntil = self.now + CFG.tackle.jukeImmunity
 			self:lungeAI(a, -(rx >= 0 and 1 or -1), 0.3 * self.dir, M.jukeSpeed, M.jukeTime, "juke")
+			self:ankleBreak(a, M.jukeBreakFreeze) -- AI carriers break ankles by the same rule (2026-11-02)
 			self:log("AI_JUKE", { who = a.team .. a.slot })
 			return
 		end
@@ -1338,9 +1531,12 @@ function G:updateBlocks()
 				if self.now >= d.st.engagedUntil then
 					local dx, dz = self:pos(d)
 					if dist2(ox, oz, dx, dz) < TC.blockReach then
-						d.st.engagedUntil = self.now + TC.blockDrag; o.st.blockCd = self.now + TC.blockCooldown
-						self:fb(o, "BLOCK!", "good", 0.6); self:fb(d, "BLOCKED", "bad", 0.6)
-						self:log("BLOCK", { by = o.team .. o.slot, on = d.team .. d.slot })
+						-- FEATURE WAVE 2 (feel-upgrades #9): a blocker at sprint speed at contact pancakes — longer drag, louder string
+						local pancake = self:speedOf(o) >= (TC.pancakeSpeed or 8)
+						d.st.engagedUntil = self.now + (pancake and (TC.blockDragSprint or 0.8) or TC.blockDrag); o.st.blockCd = self.now + TC.blockCooldown
+						if pancake then self:fb(o, "PANCAKE!", "good", 1.0, "block thrown at sprint speed"); self:fb(d, "FLATTENED", "bad", 1.0, "blocked at sprint speed")
+						else self:fb(o, "BLOCK!", "good", 0.6); self:fb(d, "BLOCKED", "bad", 0.6) end
+						self:log("BLOCK", { by = o.team .. o.slot, on = d.team .. d.slot, pancake = pancake or nil })
 						break
 					end
 				end
@@ -1356,6 +1552,21 @@ function G:updateRun(dt)
 	local f = self.field
 	if self:scoredAt(z) then self:endPlay("TD", z, (c.kind == "human" and c.name or "AI") .. " ran it in"); return end
 	if math.abs(x - f.cx) > f.halfW then self:endPlay("OOB", z, "stepped out of bounds"); return end
+	-- FEATURE WAVE 2 (feel-upgrades #8 / §3.2.5): breakaway — past the LOS with no defender within 6 m that isn't
+	-- clearly behind him. Banner + feedback + log only: no speed changes, no rubber-banding. Fires once per play.
+	if not self.breakawayFired and (z - self.los) * self.dir > 0 then
+		local clear = true
+		for _, d in ipairs(self:defenders()) do
+			local dx2, dz2 = self:pos(d)
+			if (dz2 - z) * self.dir > -1.0 and dist2(x, z, dx2, dz2) < 6 then clear = false; break end
+		end
+		if clear then
+			self.breakawayFired = true
+			self:msg("BREAKAWAY!", 1.6)
+			self:fbTeam(self.offense, "HE'S GONE!", "good", 1.4)
+			self:log("BREAKAWAY", { who = c.team .. c.slot })
+		end
+	end
 end
 
 -------------------------------------------------------------------------------------------------- tackling
@@ -1585,7 +1796,7 @@ function G:prompt(a)
 	elseif self.state == "live" then
 		if off then
 			if a.slot == 1 and self.ball and self.ball.holder == a and self.phase == "pocket" then
-				return "THROW: tap 1–" .. (self.size - 1) .. " (hold = lob) · F = man you face · run past the line to scramble"
+				return "THROW: tap 1–" .. (self.size - 1) .. " (hold = lob · C+tap = pump) · F = man you face · run past the line to scramble"
 			end
 			if self.carrier == a then return "RUN! Q/E juke · C spin · R stiff-arm" end
 			if not a.st.released then return "HUT! SPACE to release!" end
@@ -1719,6 +1930,11 @@ function G:intent(player, d)
 			local r = n and self.slots[a.team][math.floor(n) + 1]
 			if r then self:throwTo(a, r, d.lob == true, false) end
 			return
+		elseif act == "pump" then -- FEATURE WAVE 2 (feel-upgrades #6): C/ButtonY + a quick tap of the throw key
+			local n = tonumber(d.target)
+			local r = n and self.slots[a.team][math.floor(n) + 1]
+			self:pumpFake(a, r)
+			return
 		elseif act == "throwAim" or act == "catchAggressive" then
 			local aim = typeof(d.aim) == "Vector3" and d.aim or a.hrp.CFrame.LookVector
 			local x, z = self:pos(a)
@@ -1762,9 +1978,11 @@ function G:intent(player, d)
 			local sgn = act == "jukeL" and 1 or -1
 			a.st.jukeCd = self.now + M.jukeCooldown; a.st.immuneUntil = self.now + T.jukeImmunity
 			self:sendTo(a, { kind = "lunge", dir = Vector3.new(math.cos(h) * sgn, 0, -math.sin(h) * sgn), speed = M.jukeSpeed * S, time = M.jukeTime })
+			self:ankleBreak(a, M.jukeBreakFreeze) -- 2026-11-02
 		elseif moveKey == "spin" and self.now >= a.st.spinCd then
 			a.st.spinCd = self.now + M.spinCooldown; a.st.immuneUntil = self.now + M.spinTime
 			self:sendTo(a, { kind = "lunge", dir = Vector3.new(math.sin(h), 0, math.cos(h)), speed = M.spinSpeed * S, time = M.spinTime, spin = true })
+			self:ankleBreak(a, M.spinBreakFreeze) -- 2026-11-02
 		elseif moveKey == "stiffarm" and self.now >= a.st.stiffCd then
 			a.st.stiffCd = self.now + M.stiffArmCooldown
 			local x, z = self:pos(a)

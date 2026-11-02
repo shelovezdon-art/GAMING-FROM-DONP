@@ -1,4 +1,4 @@
--- MIRROR of ReplicatedStorage.AWFootball.Config (ModuleScript), pulled 2026-11-02.
+-- MIRROR of game.ReplicatedStorage.AWFootball.Config (ModuleScript), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
 -- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · Football 1v1 tunables (Roblox port of the browser build's AW.FOOTBALL_CFG, Milestone 01).
 -- Units are METRES and SECONDS, exactly as in the browser prototype; the services convert to studs with STUD (0.35 m).
@@ -166,7 +166,8 @@ local Config = {
 	},
 
 	qb = { dropbackDepth = 3.0, dropbackTime = 0.8, minReadTime = 1.1, deadline = 3.4, windup = 0.35,
-		throwSpeedMin = 14, throwSpeedMax = 27, accuracy = 0.82, rushedPenalty = 0.9, leadFactor = 0.85 }, -- throwSpeedMax was 24; 27 ≈ the sourced 26.8 m/s elite ceiling (football-ruleset.md §4)
+		throwSpeedMin = 14, throwSpeedMax = 27, accuracy = 0.82, rushedPenalty = 0.9, leadFactor = 0.85, -- throwSpeedMax was 24; 27 ≈ the sourced 26.8 m/s elite ceiling (football-ruleset.md §4)
+		pumpPoseS = 0.2 }, -- pump-fake windup pose length (feel-upgrades #6, FEATURE WAVE 2); the cost is pocket time
 	ball = { gravity = 13.5, catchHeight = 1.25, minFlight = 0.55, maxFlight = 2.15 }, -- maxFlight was 1.6: owner wants deep balls rewarded (live-tuned + approved 2026-11-02)
 	jump = { highCatchHeight = 2.05, needHeight = 0.55, tightCoverage = 2.2, jumpSpeed = 6.2, gravity = 22,
 		flightScale = 1.35, maxFlight = 2.5, cpuReaction = 0.12, aggressiveMargin = 0.05 }, -- maxFlight was 1.95: longer jump-ball hang (owner, 2026-11-02)
@@ -175,10 +176,12 @@ local Config = {
 		-- run-after-catch beat (owner, 2026-11-02): tackle immunity right after a completion so the catcher — human or
 		-- AI — can turn upfield and attempt a move instead of being wrapped at the catch point. ~4 m of free running.
 		runAfterCatch = 0.45,
+		-- stride-graded RAC (design review 2026-11-02): catch on the move = a rolling start, aerial = beat + landing
+		racRolling = 0.72, racStrideMps = 4, racAerial = 0.45,
 		-- Which catch model Rules.resolveCatch uses. "roll" is the shipped quality-roll (0.97/0.80/0.50/0.35,
 		-- untouched above); "deterministic" routes to Rules.judgeCatchDeterministic, which never rolls a die.
 		-- Default stays "roll" until parity is proven in a playtest. Flip this key, nothing else.
-		model = "roll",
+		model = "deterministic", -- was "roll" (owner + design review 2026-11-02): geometry decides, no dice; jump balls stay timing duels
 		-- Deterministic model. Difficulty is a sum of three readable terms against `threshold`.
 		-- Basis [VERIFIED technique]: above the waist the fingers point up and the thumbs touch; below the waist
 		-- the hands turn down and the pinkies meet. That switch at the waist is the real, teachable, binary rule.
@@ -200,13 +203,20 @@ local Config = {
 			dropBandM = 0.35,            -- how far past the threshold still reads as a DROP rather than out of reach
 		},
 	},
-	defend = { swatReach = 1.7, intReach = 0.95, cpuAttemptChance = 0.55, reaction = 0.22 },
+	defend = { swatReach = 1.7, intReach = 0.95, cpuAttemptChance = 0.55, reaction = 0.22,
+		-- DB risk/reward (design review 2026-11-02): every wrong guess has a price and a name
+		jumpStunS = 0.4, pressLockoutS = 0.5,
+		-- biting on a double move / pump fake (football-feel-upgrades.md §3.3.2, FEATURE WAVE 2): stumble + this slow
+		biteSlowMult = 0.8, biteSlowS = 1.0 },
 	tackle = { reach = 1.35, lungeReach = 1.7, lungeTime = 0.3, lungeSpeed = 12.5, whiffRecovery = 0.65, cooldown = 0.9,
 		facingCos = 0.15, jukeImmunity = 0.28, cleanClosingSpeed = 4.0, cleanAngleCos = -0.2, wrapDrag = 0.45,
 		breakWindow = 0.35, cpuBreakChance = 0.35 },
 	move = { wrSpeed = 9.6, dbSpeed = 9.3, cpuWrSpeed = 9.1, cpuDbSpeed = 9.25, carrySpeed = 9.0, jukeSpeed = 12.5,
 		jukeTime = 0.22, jukeCooldown = 1.1, spinTime = 0.42, spinCooldown = 1.6, spinSpeed = 6.5, stiffArmReach = 1.6,
-		stiffArmStun = 0.7, stiffArmCooldown = 1.4 },
+		stiffArmStun = 0.7, stiffArmCooldown = 1.4,
+		-- ankle-breaker (owner: "jukes should give some type of space", 2026-11-02): a defender CLOSING inside the
+		-- radius when the carrier jukes/spins bites and freezes; patient defenders (not closing) never bite.
+		jukeBreakRadius = 3.5, jukeBreakFreeze = 0.3, spinBreakFreeze = 0.25, jukeBreakClosingMps = 2 },
 	-- Sprint (owner feature, 2026-11-02): hold the burst key for +15%, on a short stamina tank so it's a decision,
 	-- not a default. Same rules for AI (carrier + pursuit sprint). Locks out at empty until minToStart recovers.
 	sprint = { mult = 1.15, staminaMax = 3.0, drainRate = 1.0, recoverRate = 0.6, minToStart = 0.8 },
