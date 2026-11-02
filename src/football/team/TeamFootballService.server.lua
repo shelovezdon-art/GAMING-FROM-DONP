@@ -133,7 +133,9 @@ end
 local function setGroup(model, g) for _, p in ipairs(model:GetDescendants()) do if p:IsA("BasePart") then p.CollisionGroup = g end end end
 
 -------------------------------------------------------------------------------------------------- AI bodies
-local ANIM = { run = "rbxassetid://913376220", idle = "rbxassetid://507766388" }
+-- was: local ANIM = { run = "rbxassetid://913376220", idle = "rbxassetid://507766388" } (ids + walk from AWMotion.ANIM, 2026-11-02)
+local ANIM = {}
+for k, id in pairs(AWMotion.ANIM.r15) do ANIM[k] = "rbxassetid://" .. id end
 local SKINS = { Color3.fromRGB(141, 90, 59), Color3.fromRGB(198, 134, 66), Color3.fromRGB(90, 59, 42), Color3.fromRGB(224, 172, 105), Color3.fromRGB(110, 70, 45), Color3.fromRGB(241, 194, 125) }
 local function tagFor(model, text, color)
 	local head = model:FindFirstChild("Head")
@@ -842,12 +844,10 @@ function G:aiStep(a, dt)
 	local v = a.hrp.AssemblyLinearVelocity
 	local flat = Vector3.new(v.X, 0, v.Z)
 	local sp = flat.Magnitude / S
-	local run, idle = a.tracks and a.tracks.run, a.tracks and a.tracks.idle
-	if run and idle then
-		if sp > 1.0 then
-			if not run.IsPlaying then run:Play(0.15); idle:Stop(0.15) end
-			run:AdjustSpeed(math.clamp(sp * S / 16, 0.8, 2.2) * ((flat.Unit:Dot(a.hrp.CFrame.LookVector) < -0.3) and -0.8 or 1))
-		elseif not idle.IsPlaying then idle:Play(0.2); run:Stop(0.2) end
+	if a.tracks then
+		-- was: binary idle<->run at sp>1.0 m/s with run:AdjustSpeed(math.clamp(sp * S / 16, 0.8, 2.2) * (backpedal and -0.8 or 1)) (2026-11-02)
+		local backward = flat.Magnitude > 1e-4 and flat.Unit:Dot(a.hrp.CFrame.LookVector) < -0.3
+		AWMotion.locomote(a.tracks, flat.Magnitude, backward, st)
 	end
 end
 
