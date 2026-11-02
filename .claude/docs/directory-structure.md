@@ -30,6 +30,7 @@ own toolchain:
 | **Godot** | `src/` | No constraint — Godot loads from `res://` anywhere under the project root. |
 | **Unity** | `Assets/` | Unity compiles **only** `Assets/` and `Packages/`. Code outside them is invisible to the compiler. |
 | **Unreal** | `Source/<Module>/` | UnrealBuildTool discovers modules under `Source/`; content lives in `Content/`. A module elsewhere is not built. |
+| **Roblox** | **Roblox Studio** (the place file); `src/` only as a mirror, or as the root once Rojo is set up | No toolchain compiles the repo. Studio is the source of truth and `src/` is a copy that can go stale. See `docs/practice/ROBLOX-PRACTICE.md` §1. |
 
 **Resolve the code root from `engine.name` before writing any source file.** A
 path shown as `src/…` alone is a Godot example: read it as *"the code root"* and
@@ -42,5 +43,6 @@ substitute the row above. `src/` is the table's Godot row, not a universal path.
 | **Godot** | `tests/unit/`, `tests/integration/` | — |
 | **Unity** | `Assets/Tests/EditMode/`, `Assets/Tests/PlayMode/` | not compiled: "0 tests, Passed" |
 | **Unreal** | `Source/<Module>/Private/Tests/` | not built: "No automation tests matched" |
+| **Roblox** | `tests/roblox/<system>/` (Command Bar `loadstring` harnesses, run by hand through Studio) | no runner exists; a harness nobody ran is not evidence |
 
 Read `tests/unit/[system]/` (or `integration/`) anywhere as the test root plus `[System]/`.

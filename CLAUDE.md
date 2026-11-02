@@ -28,6 +28,15 @@ Each agent owns a specific domain, enforcing separation of concerns and quality.
 >
 > Roblox-specific authority model and module layout for the football core:
 > `design/gdd/football-core.md` §6.
+>
+> **The project's own practice replaces the engine-specific parts. Read it before changing the game:**
+> - `docs/practice/ROBLOX-PRACTICE.md`: where code lives (Studio, no Rojo yet), the save-to-Roblox gate,
+>   scoped and reversible edits, the verification order (`loadstring` compile → evaluate without `require` →
+>   harness → playtest + console → retained screenshot), measure-don't-infer, and units (1 stud = 0.35 m).
+> - `docs/practice/DEFINITION-OF-DONE.md`: what a story and a sport must prove before being called done.
+>   Placeholder or partial work is Partial, never Done.
+> - Roblox rows/sections now exist in `.claude/docs/directory-structure.md`, `.claude/docs/run-and-observe.md`
+>   and the CI note in `.claude/docs/coding-standards.md` (there is no headless CI).
 
 ## Project Structure
 

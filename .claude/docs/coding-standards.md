@@ -92,7 +92,14 @@ falling back to the defaults above when it is absent.
 - Automated test suite runs on every push to main and every PR
 - No merge if tests fail — tests are a blocking gate in CI
 - Never disable or skip failing tests to make CI pass — fix the underlying issue
-- Engine-specific CI commands:
-  - **Godot**: `godot --headless -s -d --remote-debug tcp://127.0.0.1:0 res://addons/gdUnit4/bin/GdUnitCmdTool.gd -a res://tests --ignoreHeadlessMode`
-  - **Unity**: `game-ci/unity-test-runner@v4` (GitHub Actions)
-  - **Unreal**: headless runner with `-nullrhi` flag
+- The template's Godot / Unity / Unreal CI commands were removed here because they do not apply to this
+  project. They remain in the upstream template.
+- **Roblox (this project): there is no headless CI today.** The rules above about CI gates describe a target,
+  not a current state. No pipeline runs on push, and nothing blocks a merge automatically.
+  - **What substitutes now:** the ordered manual verification in `docs/practice/ROBLOX-PRACTICE.md` §4. That is
+    `loadstring` compile, evaluation without `require`, the pure-Luau Command Bar harnesses (e.g. TKL-0 in
+    `production/qa/football-test-plan.md`), then a playtest with console capture and a retained screenshot. A
+    story's evidence must include the harness's PASS lines. "CI passed" can never be claimed.
+  - **What would enable real CI later (owner decision, not set up; tool names are candidates, not verified here):** Rojo, to make `src/` the source of truth,
+    plus a Luau test runner (e.g. TestEZ or Jest-Lua) run headlessly (e.g. `run-in-roblox` or Open Cloud Luau
+    execution). Until that exists, do not write CI config or claim CI coverage.

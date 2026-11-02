@@ -53,6 +53,7 @@ engine has a native way.
 | Godot 4 | `godot --path . --windowed --resolution 1280x720 <scene>.tscn` | `--write-movie <path>.png --quit-after <N>` | beside the given path, `<name>00000000.png` … | `--headless` | **none** |
 | Unity 6 | built player `.exe -screen-width 1280 -screen-height 720 -screen-fullscreen 0 --scene <Name>` | `ScreenCapture.CaptureScreenshot(<abs path>)` from a bootstrap script | the absolute path you pass | `-batchmode`, `-nographics` | one MonoBehaviour |
 | Unreal 5 | `MSYS_NO_PATHCONV=1 "<UE root>/Engine/Binaries/Win64/UnrealEditor.exe" "$(pwd -W 2>/dev/null || pwd)/<Game>.uproject" <MapURL> -game -windowed -ResX=1280 -ResY=720` | `HighResShot 1280x720 filename=<abs path>` console command | the path you pass (else `Saved/Screenshots/WindowsEditor/`) | `-nullrhi`, `-unattended` alone | one actor or `-ExecCmds` |
+| Roblox | Studio play session via the MCP bridge: `start_stop_play` | bridge `screen_capture`, saved into `production/qa/evidence/` | the path you save to; confirm with `ls` | `require` to verify an edit (cached) | none; see the Roblox section |
 
 ### Godot 4 — zero scaffold
 
@@ -175,6 +176,29 @@ frame, before the file is written, and leaves nothing on disk. `-ExecCmds` has
 no delay, so let `timeout` end the launch (exit 124 is expected) and check the
 file exists; a dev actor can instead wait a second, then `quit`. The Blueprint node `Take High Res Screenshot` is editor-only and
 does not work in a `-game` launch.
+
+### Roblox: Studio through the MCP bridge (this project)
+
+There is no command-line launch. Roblox Studio is the runtime, driven through the bridge. Full practice:
+`docs/practice/ROBLOX-PRACTICE.md` §4. Before you start: the place has been **saved to Roblox** this session, and
+nobody else is mid-edit in the scripts you are about to exercise.
+
+1. **Pre-checks in Edit mode:** `execute_luau` → `loadstring(inst.Source)` for each changed script, then
+   `loadstring(inst.Source)()` for each changed module. **Never verify through `require`**, because it returns the
+   cached table from before your edit.
+2. **Launch:** `start_stop_play` to start a play session. `get_studio_state` confirms the Server/Client datamodels exist.
+3. **Reach the state:** drive it from the **Server** datamodel with the runtime test hooks
+   (football: `ReplicatedStorage.AWFootball.TestHookTeam`, which is created by `TeamFootballService` at runtime and
+   absent in Edit mode). Where no hook can reach the state, a human plays to it. Say which.
+4. **Console:** `get_console_output`. Any warning or error is a failure of the run. `TeamFootballService`'s `pcall`
+   wrapper turns a crash into a warning and a silent reset.
+5. **Capture and look:** `screen_capture` with the state on screen. Save it to
+   `production/qa/evidence/<yyyy-mm-dd>/<ID>-<what>.png`, `ls` it, `Read` it, and compare it to the acceptance criteria.
+6. **Stop:** `start_stop_play` to end the session. Changes made during Play are discarded by Studio, so nothing
+   learned in Play is "fixed" until it is made in Edit.
+
+Stamps: `review-receipts.sh` hashes repo files only. For Studio-only scripts, write the script path,
+`#Source` and line count into `stamp.txt` (practice §7).
 
 ### Any engine — OS capture fallback
 
