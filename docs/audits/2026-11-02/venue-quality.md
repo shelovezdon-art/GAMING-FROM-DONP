@@ -102,6 +102,14 @@ No floor, no pitch, no seating; 52 of 103 parts are Neon. Its own sign reads `Si
 - Pitch is 16 separate CanCollide strips at 16.07 studs with no overlap — seams every 16 studs.
 
 ### 18_BasketballCourts
+> **CORRECTION, measured 2026-11-02 after this audit.** The rim is **not** too low. Measured on the built court:
+> floor top at Y 0.500, every rim at Y 9.214 — **8.714 studs above the floor, which is exactly 3.050 m at the
+> code's 2.857 studs/m conversion, i.e. regulation.** The error below came from measuring the rim against the
+> court's *built* scale (3.5 studs/m) instead of the scale the code converts with. What IS true is the other half:
+> `CourtSurface` is 98.23 × 52.25 studs, which is regulation 28 × 15 m only at 3.5 studs/m — so **the court and
+> backboard are built ~22% oversized relative to the players standing on them and to the correctly-placed rim**.
+> Do not lift the rim. The decision is whether to rescale the court, and the dunk gates need no retuning.
+
 - **Hoop assembly mounted ~1.46 studs too low.** The backboard is internally correct (3.82 × 6.54 studs =
   1.09 × 1.87 m vs regulation 1.05 × 1.80) and the rim sits 0.53 studs above the backboard bottom, matching the
   real 0.15 m. But the assembly is placed with the rim at **y = 9.21** where the court's own scale needs
