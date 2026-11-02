@@ -67,3 +67,46 @@ Stance-fade blend applied (two edits in the pose block).
 1. Verify `AWMotion` and `AthleteMotion` still hold the work above (compile + pose keys).
 2. Re-run the 9-script mirror (see `active.md` — only TeamFootballService is fresh).
 3. Finish the remaining edits above.
+
+---
+
+## UPDATE 16:55 — wave COMPLETED in Studio, then the bridge dropped again
+
+The stance/pre-snap agent finished every remaining item and self-verified: all four touched scripts
+loadstring-compile, AWMotion evaluates standalone, **60 harness checks, 0 FAIL**. I could NOT run my own
+independent verification — the device bridge dropped mid-check (twice, confirmed) — so everything below is
+the agent's report, not orchestrator-verified. Re-verify on reconnect before trusting it.
+
+### Shipped (per the agent)
+- **Ball spotted on the ground** at the LOS pre-snap (`service:765`, `sendBall:1937` new `mode="spotted"`,
+  `client:1270-1277` renders it laid on its side, nose up 8°, trail/glow off). The agent audited all 11
+  readers of `ball.holder` first — all are gated behind `phase == "pocket"/"run"` or `b.air`, so a nil
+  pre-snap holder is safe.
+- **Snapper = slot 5 (RB)** on both real 5v5 fields, measured live, helper re-measures every setupDown.
+  Placed over the ball in the new `snap` pose; `getSet` skips him (the blanket wrStance loop would have
+  stood him back up — a latent bug); pose cleared at the snap; `leave()` re-points `self.snapper`.
+  No snapper in 1v1/2v2 by design (the lone receiver on the ball reads worse).
+- **QB two hands**: `qbSet` rolled inward (the old pose had no shoulder roll — why it never read),
+  new `qbCarry` set at the snap (previously the QB was left POSELESS at snap), cleared at handoff/scramble,
+  **restored after a pump fake** (another latent bug — a pump left him poseless for the rest of the pocket).
+  Client renders the ball at the **LeftHand–RightHand midpoint**, identified from the published AWPose
+  attribute (no new server field), claiming arms `"busy"` so tuckR doesn't fold through the cradle.
+- **DB stance hole fixed at `flip` (:876)** — was clearing the pose to nil, leaving covering defenders with
+  no pose at all. Now applies the new `cover` ready stance, dropped on one attribute write when he
+  transitions to pursuit.
+- **Stance fade** (`STANCE_FADE` + `stanceWeight`, AthleteMotion:140/151): only listed stance poses fade with
+  speed; `throw`/`collapse`/`reach` verified identical at 0 and 30 studs/s. `qbCarry`/`pedal` keep a 0.55
+  floor. Measured: dbCrouch knee −84° at rest → −42° at 3 studs/s → 0° at 20.
+
+### Correction the agent made to my brief (worth keeping)
+Poses apply **multiplicatively** over the animation (`AthleteMotion:156`), so they never froze locomotion.
+The real defect was the inverse — a full-depth crouch on a sprinting body reads as running in a squat — which
+is why the deeper crouch *needed* the fade. My brief had the diagnosis backwards; the agent measured it.
+
+### On reconnect
+1. Re-verify the four scripts compile and the 8 poses resolve (my check never ran).
+2. Re-mirror `TeamFootballService`, `TeamFootballClient`, `AWMotion`, `AthleteMotion` — the repo copies
+   predate this wave.
+3. Owner playtest: ball on the ground → jumps to the QB's hands at HUT; RB bent over the ball and still
+   down at SET; two-hand cradle in the pocket that survives a pump fake; DBs holding a ready stance after
+   the hip flip and fading to a clean sprint as they open up.
