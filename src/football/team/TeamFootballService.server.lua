@@ -1,4 +1,4 @@
--- MIRROR of game.ServerScriptService.TeamFootballService (Script), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
+-- MIRROR of game.ServerScriptService.TeamFootballService (Script), pulled 2026-11-02 (post wave-3 + 1v1 Gauntlet + DRIP + broadcast UI).
 -- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · TeamFootballService (Milestone 06): 2v2 and 5v5 football on the Football Park team fields.
 -- HOME vs AWAY. Friends take slots by pressing E on a team's JOIN pad; the lobby shows the roster, everyone taps READY,
@@ -24,6 +24,7 @@ local S = 1 / CFG.STUD
 
 local TC = {
 	modes = {
+		["1v1"] = { size = 1, possessionsEach = 4, rushCount = 0 }, -- THE GAUNTLET: runner vs tackler, tackler free at the snap (2026-11-02)
 		["2v2"] = { size = 2, possessionsEach = 4, rushCount = 3.0 },
 		["5v5"] = { size = 5, possessionsEach = 4, rushCount = 3.2 },
 	},
@@ -56,6 +57,14 @@ local TEAMNAME = { home = "HOME", away = "AWAY" }
 local TEAMCOLOR = { home = Color3.fromRGB(70, 150, 255), away = Color3.fromRGB(255, 191, 58) }
 local clamp = Rules.clamp
 
+-- AW DRIP hooks (2026-11-02, DRIP STORE v1): cosmetics earn events for DripService. -- was: no cosmetics events
+-- The BindableEvent RS.AWFootball.MatchEvents is created by DripService; this service only fires it if present.
+-- Cosmetics never feed back into gameplay: these are one-way notifications (cosmetics.md F5).
+local function awDripFire(payload)
+	local ev = folder:FindFirstChild("MatchEvents")
+	if ev then pcall(function() ev:Fire(payload) end) end
+end
+
 -------------------------------------------------------------------------------------------------- routes + plays
 -- lateral + is toward the middle of the field, downfield + is toward the end zone being attacked
 local ROUTES = {}
@@ -72,6 +81,7 @@ end
 
 -- offense roles by slot, formation spots {lateral (offense's right = +), depth (behind the line = −)}
 local ROLES = {
+	["1v1"] = { off = { "RB" }, def = { "TACKLER" } }, -- THE GAUNTLET (2026-11-02)
 	["2v2"] = { off = { "QB", "WR" }, def = { "RUSH", "CB" } },
 	["5v5"] = { off = { "QB", "X", "Z", "SLOT", "RB" }, def = { "RUSH", "CB", "CB", "NICKEL", "LB" } },
 }
@@ -83,36 +93,49 @@ local ROLES = {
 -- FOUR VERTS { fade,fade,seam,curl }, MESH { cross,slant,curl,flat }, DEEP SHOT { post,curl,seam,wheel },
 -- QUICK { curl,curl,slant,flat } (2026-11-02)
 local PLAYS = {
+	-- FEEDBACK WAVE 3 (owner: "keep it pass and keep it run, so you can have a running back", 2026-11-02):
+	-- every play carries cat = "PASS" | "RUN"; a RUN play carries run = the offensive slot that takes the handoff
+	-- (1 = QB keeper). The wire format { action = "play", index } is unchanged; cat rides along in G:playBook().
+	["1v1"] = { -- THE GAUNTLET: one play — take the ball and survive (2026-11-02)
+		{ name = "GAUNTLET", routes = {}, cat = "RUN", run = 1 },
+	},
 	["2v2"] = {
-		{ name = "SLANT", routes = { "slant" } }, { name = "CURL", routes = { "curl" } },
-		{ name = "COMEBACK", routes = { "comeback" } }, { name = "POST", routes = { "post" } },
-		{ name = "SLUGGO", routes = { "sluggo" } }, { name = "GO", routes = { "fade" } },
+		{ name = "SLANT", routes = { "slant" }, cat = "PASS" }, { name = "CURL", routes = { "curl" }, cat = "PASS" },
+		{ name = "COMEBACK", routes = { "comeback" }, cat = "PASS" }, { name = "POST", routes = { "post" }, cat = "PASS" },
+		{ name = "SLUGGO", routes = { "sluggo" }, cat = "PASS" }, { name = "GO", routes = { "fade" }, cat = "PASS" },
+		{ name = "DRAW", routes = { "free" }, cat = "RUN", run = 2 },
 	},
 	["5v5"] = {
 		-- QUICK
-		{ name = "DOUBLE SLANT", routes = { "slant", "fade", "slant", "flat" } },
-		{ name = "CURL FLAT", routes = { "curl", "curl", "seam", "flat" } },
-		{ name = "QUICK OUTS", routes = { "out", "out", "slant", "flat" } },
+		{ name = "DOUBLE SLANT", routes = { "slant", "fade", "slant", "flat" }, cat = "PASS" },
+		{ name = "CURL FLAT", routes = { "curl", "curl", "seam", "flat" }, cat = "PASS" },
+		{ name = "QUICK OUTS", routes = { "out", "out", "slant", "flat" }, cat = "PASS" },
 		-- CROSSERS
-		{ name = "MESH RAIL", routes = { "cross", "post", "cross", "wheel" } },
-		{ name = "SHALLOW DIG", routes = { "dig", "fade", "cross", "flat" } },
+		{ name = "MESH RAIL", routes = { "cross", "post", "cross", "wheel" }, cat = "PASS" },
+		{ name = "SHALLOW DIG", routes = { "dig", "fade", "cross", "flat" }, cat = "PASS" },
 		-- VERTS
-		{ name = "FOUR VERTS", routes = { "fade", "fade", "seam", "seam" } },
-		{ name = "SLUGGO SHOT", routes = { "sluggo", "comeback", "dig", "flat" } },
-		{ name = "POST WHEEL", routes = { "curl", "post", "cross", "wheel" } },
+		{ name = "FOUR VERTS", routes = { "fade", "fade", "seam", "seam" }, cat = "PASS" },
+		{ name = "SLUGGO SHOT", routes = { "sluggo", "comeback", "dig", "flat" }, cat = "PASS" },
+		{ name = "POST WHEEL", routes = { "curl", "post", "cross", "wheel" }, cat = "PASS" },
 		-- MISDIRECTION
-		{ name = "SWITCH VERTS", routes = { "post", "dig", "wheel", "flat" } },
-		{ name = "JET WHEEL", routes = { "dig", "slant", "wheel", "flat" } },
+		{ name = "SWITCH VERTS", routes = { "post", "dig", "wheel", "flat" }, cat = "PASS" },
+		{ name = "JET WHEEL", routes = { "dig", "slant", "wheel", "flat" }, cat = "PASS" },
 		-- GOALLINE
-		{ name = "GOAL FADE", routes = { "fade", "fade", "out", "flat" } },
-		{ name = "UNDER", routes = { "slant", "curl", "slant", "flat" } },
+		{ name = "GOAL FADE", routes = { "fade", "fade", "out", "flat" }, cat = "PASS" },
+		{ name = "UNDER", routes = { "slant", "curl", "slant", "flat" }, cat = "PASS" },
 		-- SPECIALS (try plays by design; callable on any down until tryOnly filtering ships)
-		{ name = "MONEY OUT", routes = { "slant", "fade", "out", "flat" } },
-		{ name = "TEN SHOT", routes = { "dig", "comeback", "seam", "wheel" } },
-		{ name = "RAIL SWING", routes = { "comeback", "post", "cross", "wheel" } },
+		{ name = "MONEY OUT", routes = { "slant", "fade", "out", "flat" }, cat = "PASS" },
+		{ name = "TEN SHOT", routes = { "dig", "comeback", "seam", "wheel" }, cat = "PASS" },
+		{ name = "RAIL SWING", routes = { "comeback", "post", "cross", "wheel" }, cat = "PASS" },
+		-- RUN (FEEDBACK WAVE 3): decoy routes pull coverage; non-carriers block once phase == "run" (updateBlocks/aiThink)
+		{ name = "INSIDE DRAW", routes = { "fade", "fade", "seam", "free" }, cat = "RUN", run = 5 },
+		{ name = "SWEEP RIGHT", routes = { "dig", "slant", "cross", "free" }, cat = "RUN", run = 5 },
+		{ name = "SWEEP LEFT", routes = { "slant", "dig", "cross", "free" }, cat = "RUN", run = 5 },
+		{ name = "QB KEEP", routes = { "fade", "fade", "out", "wheel" }, cat = "RUN", run = 1 },
 	},
 }
 local function formation(mode, slot, halfW)
+	if mode == "1v1" then return 0, -2 end -- the runner lines up alone behind the ball (2026-11-02)
 	if mode == "2v2" then
 		if slot == 1 then return 0, -4 end
 		return math.min(7, halfW - 3), 0
@@ -577,7 +600,7 @@ end
 
 function G:playNames() local t = {}; for i, p in ipairs(self.plays) do t[i] = p.name end; return t end
 -- names + route assignments, for the client play-call dashboard (owner: "show what each player does", 2026-11-02)
-function G:playBook() local t = {}; for i, p in ipairs(self.plays) do t[i] = { name = p.name, routes = p.routes } end; return t end
+function G:playBook() local t = {}; for i, p in ipairs(self.plays) do t[i] = { name = p.name, routes = p.routes, cat = p.cat or "PASS", run = p.run } end; return t end -- cat/run added for the PASS|RUN tabs (FEEDBACK WAVE 3)
 
 function G:reset()
 	for _, a in ipairs(self:athletes()) do
@@ -626,7 +649,6 @@ function G:newPossession(text)
 	self.toGain = self.field.mid
 	self:setupDown(text)
 end
-
 function G:downText()
 	if self.tryActive then return "TRY FOR " .. tostring(self.try and self.try.declared or 1) .. " · " .. TEAMNAME[self.offense] end
 	local ord = ({ "1st", "2nd", "3rd", "4th" })[self.down] or "4th"
@@ -669,6 +691,7 @@ function G:setupDown(text)
 	self.state = "preSnap"; self.phase = "pre"; self.playClock = 0
 	self.carrier = nil; self.wrap = nil; self.highBall = false; self.snapAt = nil; self.rushAt = nil; self.passCaught = nil
 	self.pumpUsed = nil; self.aiPumpRolled = nil; self.aiPumpAt = nil; self.breakawayFired = nil -- FEATURE WAVE 2 per-play flags
+	self.handoffAt = nil -- FEEDBACK WAVE 3: run-play handoff timer
 	local faceDown = dir < 0 and math.pi or 0
 	local faceUp = dir < 0 and 0 or math.pi
 	local latSign = dir < 0 and 1 or -1      -- offense's right in world x
@@ -747,6 +770,9 @@ function G:snap()
 	self.state = "live"; self.phase = "pocket"; self.playClock = 0
 	self.snapAt = self.now
 	self.rushAt = self.now + TC.modes[self.mode].rushCount
+	-- FEEDBACK WAVE 3: on a RUN play, queue the handoff (QB keeper tucks it almost immediately)
+	local runSlot = self.plays[self.play].run
+	self.handoffAt = runSlot and (self.now + (runSlot == 1 and 0.1 or 0.45)) or nil
 	local K = CFG.stance
 	for _, a in ipairs(self:athletes()) do
 		local isQB = a.team == self.offense and a.slot == 1
@@ -843,7 +869,7 @@ function G:baseSpeed(a)
 		return a.kind == "ai" and M.cpuWrSpeed or M.wrSpeed
 	end
 	if a.slot == 1 then
-		if self.now < (self.rushAt or 0) then return 0 end
+		if self.now < (self.rushAt or 0) then return a.kind == "ai" and 4 or 0 end -- was 0 for both: the AI rusher now roams the line pre-count (FEEDBACK WAVE 3); humans stay held until the count
 		return a.kind == "ai" and M.cpuDbSpeed or M.dbSpeed
 	end
 	if not a.st.released then return 0 end
@@ -859,6 +885,7 @@ function G:ankleBreak(a, freezeS)
 	local M = CFG.move
 	if not freezeS or freezeS <= 0 then return end
 	local x, z = self:pos(a)
+	local sentBadge = false -- one ANKLE BREAKER badge per move, however many defenders bit (FEEDBACK WAVE 3)
 	for _, d in ipairs(self:defenders()) do
 		local dx, dz = self:pos(d)
 		if dist2(x, z, dx, dz) <= (M.jukeBreakRadius or 0) then
@@ -868,8 +895,15 @@ function G:ankleBreak(a, freezeS)
 			if (vx * toX + vz * toZ) / l >= (M.jukeBreakClosingMps or 2) then
 				d.st.frozenUntil = math.max(d.st.frozenUntil or 0, self.now + freezeS)
 				d.st.lunge = nil
+				-- FEEDBACK WAVE 3: the bitten defender buckles (AWMotion football:collapse) for the freeze, then clears
+				setPose(d.model, "collapse", 0.08)
+				task.delay(freezeS, function() if d.model and d.model.Parent then setPose(d.model, nil, 0.2) end end)
 				self:fb(d, "ANKLES · HE CUT BACK", "bad", 1.1, "bit on the move and froze")
 				self:fb(a, "BROKE HIM OFF", "good", 1.0)
+				if not sentBadge then
+					sentBadge = true; self:sendTo(a, { kind = "badge", text = "ANKLE BREAKER", tone = "gold" })
+					if a.kind == "human" then awDripFire({ ev = "ankleBreaker", player = a.player }) end -- AW DRIP (2026-11-02)
+				end
 				self:log("ANKLE_BREAK", { by = a.team .. a.slot, on = d.team .. d.slot })
 			end
 		end
@@ -1082,6 +1116,25 @@ function G:updateLive(dt)
 	end
 	self:updatePedals()
 	self:updateDoubleMoves() -- FEATURE WAVE 2: sluggo bite detection (guards its own phases)
+	-- FEEDBACK WAVE 3 (owner: "keep it pass and keep it run"): run plays — the QB hands off once the timer is up.
+	-- passCaught stays nil, so Rules.resolveTry still reads this play as a "run" on a try (a 1-pt try run scores 0).
+	if self.handoffAt and self.phase == "pocket" and self.now >= self.handoffAt then
+		self.handoffAt = nil
+		local qb = self:qb()
+		local slot = self.plays[self.play].run
+		local back = slot and self.slots[self.offense][slot]
+		if back and self.ball and self.ball.holder == qb and not self.ball.air then
+			self.carrier = back; self.phase = "run"
+			if back ~= qb then
+				self.ball = { holder = back, air = false }
+				if back.kind == "ai" then back.faceHeading = nil end
+			end
+			self:msg(back == qb and "QB KEEPER!" or "HANDOFF!", 1.0)
+			self:fb(back, (back == qb and "KEEP IT" or "YOUR BALL") .. " · Q/E juke · C spin · R stiff-arm", "warn", 1.2)
+			self:sendBall()
+			self:log("HANDOFF", { to = self.offense .. tostring(slot), keeper = back == qb or nil })
+		end
+	end
 	if self.phase == "pocket" then self:updatePocket(dt) end
 	if self.ball and self.ball.air then self:updateFlight(dt) end
 	if self.state ~= "live" then return end
@@ -1293,6 +1346,9 @@ function G:resolveArrival(forced)
 	local grade = Rules.catchGrade(wr.st.catchPress and (wr.st.catchPress.at - b.airTime) or nil, CFG)
 	if res.result == "CATCH" then
 		self:fb(wr, (self.highBall and "SKIED FOR IT!") or ((grade == "PERFECT" and "PERFECT " or grade == "GOOD" and "CLEAN " or "") .. "CATCH"), "good", 1.2, res.detail)
+		-- catch reward badge (owner: "you want to FEEL like you're catching the ball", FEEDBACK WAVE 3)
+		self:sendTo(wr, { kind = "badge", text = grade == "PERFECT" and "PERFECT CATCH!" or grade == "GOOD" and "CLEAN CATCH" or "CATCH", tone = "good" })
+		if grade == "PERFECT" and wr.kind == "human" then awDripFire({ ev = "perfectCatch", player = wr.player }) end -- AW DRIP (2026-11-02)
 		self:fb(db, "COMPLETE · GO MAKE THE TACKLE", "bad", 1.0)
 		self:fb(b.thrower, "COMPLETE!", "good", 1.0)
 	elseif res.result == "INT" then
@@ -1415,7 +1471,25 @@ function G:aiReceiver(a)
 	local tgt = pts[math.min(i, #pts)]
 	if dist2(x, z, tgt.x, tgt.z) < 0.8 then
 		if i < #pts then a.st.routeIdx += 1; tgt = pts[a.st.routeIdx]
-		elseif a.route == "curl" or (ROUTES[a.route] and ROUTES[a.route].settle) then self:hold(a); return -- settle routes (comeback) hold at the break; extending would run them backward (FEATURE WAVE 2)
+		elseif a.route == "curl" or (ROUTES[a.route] and ROUTES[a.route].settle) then -- settle routes (comeback) hold at the break; extending would run them backward (FEATURE WAVE 2)
+			-- FEEDBACK WAVE 3 (owner: "they're not really doing anything"): past 2.2 s of pocket time an exhausted
+			-- route works open — 3–4 m lateral nudges every ~0.8 s away from the nearest defender, inbounds, never
+			-- back across the LOS
+			if self.phase == "pocket" and self.playClock > 2.2 then
+				local st = a.st
+				if not st.driftAt or self.now >= st.driftAt then
+					st.driftAt = self.now + 0.8
+					local nd = self:nearestDefender(x, z)
+					local away = 1
+					if nd then local ndx = self:pos(nd); away = (x - ndx) >= 0 and 1 or -1 end
+					local f = self.field
+					local tz = z
+					if (tz - self.los) * self.dir < 1 then tz = self.los + self.dir * 1 end
+					st.drift = { x = clamp(x + away * 3.5, f.cx - f.halfW + 1, f.cx + f.halfW - 1), z = tz }
+				end
+				if st.drift then self:steer(a, st.drift.x, st.drift.z, M.cpuWrSpeed * 0.8); return end
+			end
+			self:hold(a); return
 		else
 			local p0 = pts[#pts - 1] or a.spot
 			local dx, dz = tgt.x - p0.x, tgt.z - p0.z
@@ -1437,11 +1511,19 @@ function G:aiCarrier(a)
 		local rx, rz = ox - x, oz - z
 		if rz * self.dir > -1 and dd < 12 then dx = (rx > 0 and -1 or 1) * clamp((12 - dd) / 9, 0.2, 0.95) end
 		if dd < 2.6 and self.now >= a.st.jukeCd and self.rng:next() < CFG.ai.cpuJukeChance then
-			a.st.jukeCd = self.now + M.jukeCooldown
-			a.st.immuneUntil = self.now + CFG.tackle.jukeImmunity
-			self:lungeAI(a, -(rx >= 0 and 1 or -1), 0.3 * self.dir, M.jukeSpeed, M.jukeTime, "juke")
-			self:ankleBreak(a, M.jukeBreakFreeze) -- AI carriers break ankles by the same rule (2026-11-02)
-			self:log("AI_JUKE", { who = a.team .. a.slot })
+			if self.rng:next() < 0.4 then -- FEEDBACK WAVE 3: 40% of triggered moves are spins, so the AI's whole bag shows up
+				a.st.jukeCd = self.now + M.spinCooldown
+				a.st.immuneUntil = self.now + M.spinTime
+				self:lungeAI(a, 0, self.dir, M.spinSpeed, M.spinTime, "spin")
+				self:ankleBreak(a, M.spinBreakFreeze)
+				self:log("AI_SPIN", { who = a.team .. a.slot })
+			else
+				a.st.jukeCd = self.now + M.jukeCooldown
+				a.st.immuneUntil = self.now + CFG.tackle.jukeImmunity
+				self:lungeAI(a, -(rx >= 0 and 1 or -1), 0.3 * self.dir, M.jukeSpeed, M.jukeTime, "juke")
+				self:ankleBreak(a, M.jukeBreakFreeze) -- AI carriers break ankles by the same rule (2026-11-02)
+				self:log("AI_JUKE", { who = a.team .. a.slot })
+			end
 			return
 		end
 	end
@@ -1473,7 +1555,18 @@ function G:aiDefender(a)
 		end
 		return
 	end
-	if a.slot == 1 then self:hold(a); return end
+	if a.slot == 1 then
+		-- FEEDBACK WAVE 3 (owner: "the person blitzing could roam around, not just stand there"): the AI rusher
+		-- shuffles along the line mirroring the QB; in the last 0.8 s before rushAt he holds and coils (the rush
+		-- pose is already set at setupDown)
+		if self.phase == "pocket" and holder and self.rushAt and self.now < self.rushAt - 0.8 then
+			local qx = self:pos(holder)
+			self:steer(a, qx + math.sin(self.now * 1.6) * 2.5, self.los + self.dir * TC.rushDepth, 4)
+		else
+			self:hold(a)
+		end
+		return
+	end
 	if not a.st.released then self:hold(a); return end
 	local man = a.man
 	if not man then self:hold(a); return end
@@ -1664,6 +1757,8 @@ function G:endPlay(kind, spotZ, detail)
 		self.score[off] += (Rules.scoreFor("TOUCHDOWN", CFG)) -- 6 + a declared try; was TC.td = 7 flat (2026-11-02)
 		self:msg("TOUCHDOWN " .. TEAMNAME[off] .. "! · " .. detail .. " · HOME " .. self.score.home .. " – " .. self.score.away .. " AWAY", 2.6)
 		self:fbTeam(off, "TOUCHDOWN!", "good", 1.6)
+		local c = self.carrier -- AW DRIP (2026-11-02): the scorer at the dead ball (set for both run-in and catch TDs)
+		if c and c.kind == "human" then awDripFire({ ev = "td", player = c.player }) end
 		self.nextStep = "try"; self:updateBoard(); self:sendHud(); return
 	end
 	if kind == "SAFETY" then
@@ -1712,6 +1807,12 @@ function G:advance()
 		self.nextStep = nil
 		self.state = "tryDeclare"; self.phase = "dead"; self.timer = TC.tryDeclareTime
 		self.try = { team = self.offense, phase = "declare", declared = nil, timeLeft = TC.tryDeclareTime }
+		if self.mode == "1v1" then
+			-- THE GAUNTLET has no passing, and the 1-pt try is pass-only — the 2-pt run from the 10 is the only real try (2026-11-02)
+			self:msg("TRY · RUN IT IN FROM THE 10 FOR +2", 2.0)
+			self:declareTry(2)
+			return
+		end
 		local qb = self.slots[self.offense][1]
 		if qb.kind == "ai" then
 			-- AI declares: go for 2 when trailing, else take the 1
@@ -1760,6 +1861,14 @@ function G:finish()
 	self:msg((w and (TEAMNAME[w] .. " WINS") or "DRAW") .. " · FINAL HOME " .. s.home .. " – " .. s.away .. " AWAY", TC.finalTime)
 	if w then self:fbTeam(w, "YOU WIN!", "good", 4); self:fbTeam(other(w), "GOOD GAME", "neutral", 4) end
 	self:log("FINAL", { home = s.home, away = s.away })
+	-- AW DRIP (2026-11-02): match complete / win earn event · human players per team at the final whistle
+	local winners, losers = {}, {}
+	for _, a in ipairs(self:athletes()) do
+		if a.kind == "human" and a.player then
+			if w and a.team == w then table.insert(winners, a.player) else table.insert(losers, a.player) end
+		end
+	end
+	awDripFire({ ev = "final", winners = winners, losers = losers, draw = w == nil })
 	self:updateBoard()
 	self:sendHud()
 end
@@ -2034,7 +2143,7 @@ local function discover()
 	if not park then warn("[TeamFootball] no football park"); return end
 	for _, m in ipairs(park:GetChildren()) do
 		local mode = m:IsA("Model") and m:GetAttribute("Mode")
-		if mode == "2v2" or mode == "5v5" then
+		if mode == "1v1" or mode == "2v2" or mode == "5v5" then -- 1v1 added 2026-11-02 (THE GAUNTLET)
 			local n, s, pad = m:FindFirstChild("EndZoneNorth", true), m:FindFirstChild("EndZoneSouth", true), m:FindFirstChild("Pad", true)
 			if n and s then
 				local id = m:GetAttribute("FieldId") or m.Name
