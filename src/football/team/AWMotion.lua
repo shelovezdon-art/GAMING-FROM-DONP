@@ -1,4 +1,4 @@
--- MIRROR of game.ReplicatedStorage.AWMotion (ModuleScript), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
+-- MIRROR of game.ReplicatedStorage.AWMotion (ModuleScript), pulled 2026-11-02 (post wave-3, Gauntlet, DRIP, broadcast UI, stance poses, 2K camera).
 -- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · AWMotion (ModuleScript in ReplicatedStorage). Shared between client scripts on one machine:
 -- a sport script that poses a character's arms itself (a dribble, a shot) "claims" the arms each frame, and the
@@ -69,26 +69,66 @@ local FOOTBALL = {
 		RightHip = CFrame.Angles(rad(8), 0, 0), RightKnee = CFrame.Angles(rad(-45), 0, 0), RightAnkle = CFrame.Angles(rad(35), 0, 0),
 		LeftShoulder = CFrame.Angles(rad(-25), 0, 0), RightShoulder = CFrame.Angles(rad(40), 0, 0),
 		LeftElbow = CFrame.Angles(rad(40), 0, 0), RightElbow = CFrame.Angles(rad(55), 0, 0) },
-	dbCrouch = { Root = CFrame.new(0, -0.45, 0), Waist = CFrame.Angles(rad(-22), 0, 0),
-		LeftHip = CFrame.Angles(rad(40), 0, rad(-8)), LeftKnee = CFrame.Angles(rad(-70), 0, 0), LeftAnkle = CFrame.Angles(rad(30), 0, 0),
-		RightHip = CFrame.Angles(rad(40), 0, rad(8)), RightKnee = CFrame.Angles(rad(-70), 0, 0), RightAnkle = CFrame.Angles(rad(30), 0, 0),
-		LeftShoulder = CFrame.Angles(rad(25), 0, rad(-22)), RightShoulder = CFrame.Angles(rad(25), 0, rad(22)),
-		LeftElbow = CFrame.Angles(rad(45), 0, 0), RightElbow = CFrame.Angles(rad(45), 0, 0) },
-	pedal = { Root = CFrame.new(0, -0.3, 0), Waist = CFrame.Angles(rad(-16), 0, 0),
-		LeftHip = CFrame.Angles(rad(22), 0, 0), LeftKnee = CFrame.Angles(rad(-35), 0, 0),
-		RightHip = CFrame.Angles(rad(22), 0, 0), RightKnee = CFrame.Angles(rad(-35), 0, 0),
-		LeftShoulder = CFrame.Angles(rad(20), 0, rad(-15)), RightShoulder = CFrame.Angles(rad(20), 0, rad(15)) },
+	-- PRE-SNAP WAVE (owner: "db stance", 2026-11-02): deepened so it reads from the sideline camera. Wider feet via
+	-- hip roll (|Z| 8 -> 16), lower root, hands up ready.
+	-- was Root -0.45 / Waist -22 / hips 40 |Z|8 / knees -70 / ankles 30 / shoulders 25 |Z|22 / elbows 45
+	dbCrouch = { Root = CFrame.new(0, -0.62, 0), Waist = CFrame.Angles(rad(-30), 0, 0),
+		LeftHip = CFrame.Angles(rad(46), 0, rad(-16)), LeftKnee = CFrame.Angles(rad(-84), 0, 0), LeftAnkle = CFrame.Angles(rad(38), 0, 0),
+		RightHip = CFrame.Angles(rad(46), 0, rad(16)), RightKnee = CFrame.Angles(rad(-84), 0, 0), RightAnkle = CFrame.Angles(rad(38), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(38), 0, rad(-38)), RightShoulder = CFrame.Angles(rad(38), 0, rad(38)),
+		LeftElbow = CFrame.Angles(rad(78), 0, 0), RightElbow = CFrame.Angles(rad(78), 0, 0) },
+	-- a covering defender who is neither pedaling nor chasing had NO pose at all before this wave (TeamFootballService
+	-- :flip cleared it to nil), so he ran the stock idle. Lighter than dbCrouch, reads as "ready", fades as he opens up.
+	cover = { Root = CFrame.new(0, -0.30, 0), Waist = CFrame.Angles(rad(-14), 0, 0),
+		LeftHip = CFrame.Angles(rad(26), 0, rad(-11)), LeftKnee = CFrame.Angles(rad(-42), 0, 0), LeftAnkle = CFrame.Angles(rad(20), 0, 0),
+		RightHip = CFrame.Angles(rad(26), 0, rad(11)), RightKnee = CFrame.Angles(rad(-42), 0, 0), RightAnkle = CFrame.Angles(rad(20), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(24), 0, rad(-26)), RightShoulder = CFrame.Angles(rad(24), 0, rad(26)),
+		LeftElbow = CFrame.Angles(rad(60), 0, 0), RightElbow = CFrame.Angles(rad(60), 0, 0) },
+	-- plainly backpedal-shaped now: chest over the toes (waist -26), short choppy stance with the legs deliberately
+	-- STAGGERED (a symmetric frozen stance reads as standing still), arms bent and carried for the pump.
+	-- was Root -0.3 / Waist -16 / both hips 22 no roll / both knees -35 / shoulders 20 |Z|15 / no elbows / no ankles
+	pedal = { Root = CFrame.new(0, -0.34, 0), Waist = CFrame.Angles(rad(-26), 0, 0),
+		LeftHip = CFrame.Angles(rad(34), 0, rad(-9)), LeftKnee = CFrame.Angles(rad(-54), 0, 0), LeftAnkle = CFrame.Angles(rad(24), 0, 0),
+		RightHip = CFrame.Angles(rad(24), 0, rad(9)), RightKnee = CFrame.Angles(rad(-42), 0, 0), RightAnkle = CFrame.Angles(rad(16), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(30), 0, rad(-20)), RightShoulder = CFrame.Angles(rad(26), 0, rad(20)),
+		LeftElbow = CFrame.Angles(rad(62), 0, 0), RightElbow = CFrame.Angles(rad(55), 0, 0) },
 	-- hands-up reach as the ball arrives (owner: "put the hands up", 2026-11-02) — thumbs-together high reach,
 	-- set by the server on the target + the contesting DB in the final windowEarly of flight
 	reach = { Waist = CFrame.Angles(rad(6), 0, 0), LeftShoulder = CFrame.Angles(rad(165), 0, rad(-8)), RightShoulder = CFrame.Angles(rad(165), 0, rad(8)),
 		LeftElbow = CFrame.Angles(rad(12), 0, 0), RightElbow = CFrame.Angles(rad(12), 0, 0) },
-	qbSet = { Waist = CFrame.Angles(rad(-8), 0, 0), LeftHip = CFrame.Angles(rad(12), 0, 0), LeftKnee = CFrame.Angles(rad(-20), 0, 0),
-		RightHip = CFrame.Angles(rad(12), 0, 0), RightKnee = CFrame.Angles(rad(-20), 0, 0),
-		LeftShoulder = CFrame.Angles(rad(30), 0, 0), RightShoulder = CFrame.Angles(rad(35), 0, 0), LeftElbow = CFrame.Angles(rad(60), 0, 0), RightElbow = CFrame.Angles(rad(60), 0, 0) },
+	-- TWO HANDS ON THE BALL (owner: "qb two hands on ball", 2026-11-02). Both arms cradle it at chest height: shoulders
+	-- forward 45, elbows folded 75, and each shoulder ROLLED INWARD (left +Z, right -Z) so the hands meet at the midline
+	-- instead of hanging at the hips. The client puts the ball at the midpoint of the two hands to match.
+	-- was shoulders 30/35 with NO roll and elbows 60 -- both hands ended up wide of the ball, which sat in the right hand only
+	qbSet = { Waist = CFrame.Angles(rad(-8), 0, 0), Root = CFrame.new(0, -0.10, 0),
+		LeftHip = CFrame.Angles(rad(16), 0, 0), LeftKnee = CFrame.Angles(rad(-26), 0, 0),
+		RightHip = CFrame.Angles(rad(16), 0, 0), RightKnee = CFrame.Angles(rad(-26), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(45), 0, rad(22)), RightShoulder = CFrame.Angles(rad(45), 0, rad(-22)),
+		LeftElbow = CFrame.Angles(rad(75), 0, 0), RightElbow = CFrame.Angles(rad(75), 0, 0) },
+	-- the same two-hand cradle, upright, for the QB in the pocket after the snap. Set by TeamFootballService at G:snap
+	-- (which used to clear the QB's pose to nil, leaving him empty-handed-looking with the ball floating in one hand).
+	qbCarry = { Waist = CFrame.Angles(rad(-4), 0, 0),
+		LeftHip = CFrame.Angles(rad(8), 0, 0), LeftKnee = CFrame.Angles(rad(-14), 0, 0),
+		RightHip = CFrame.Angles(rad(8), 0, 0), RightKnee = CFrame.Angles(rad(-14), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(44), 0, rad(24)), RightShoulder = CFrame.Angles(rad(44), 0, rad(-24)),
+		LeftElbow = CFrame.Angles(rad(78), 0, 0), RightElbow = CFrame.Angles(rad(78), 0, 0) },
+	-- the snapper, bent over the spotted ball at the line of scrimmage. Deep hip hinge at the waist, knees loaded, both
+	-- shoulders swung forward/down with near-straight elbows so the hands reach the ground on the ball. Cleared at the snap.
+	snap = { Root = CFrame.new(0, -0.55, 0), Waist = CFrame.Angles(rad(-55), 0, 0),
+		LeftHip = CFrame.Angles(rad(40), 0, rad(-14)), LeftKnee = CFrame.Angles(rad(-70), 0, 0), LeftAnkle = CFrame.Angles(rad(30), 0, 0),
+		RightHip = CFrame.Angles(rad(40), 0, rad(14)), RightKnee = CFrame.Angles(rad(-70), 0, 0), RightAnkle = CFrame.Angles(rad(30), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(70), 0, rad(10)), RightShoulder = CFrame.Angles(rad(70), 0, rad(-10)),
+		LeftElbow = CFrame.Angles(rad(20), 0, 0), RightElbow = CFrame.Angles(rad(20), 0, 0) },
 	throw = { Waist = CFrame.Angles(0, rad(-25), 0), RightShoulder = CFrame.Angles(rad(160), 0, rad(20)), RightElbow = CFrame.Angles(rad(40), 0, 0),
 		LeftShoulder = CFrame.Angles(rad(40), 0, rad(-10)) },
 	rush = { Root = CFrame.new(0, -0.35, 0), Waist = CFrame.Angles(rad(-30), 0, 0), LeftHip = CFrame.Angles(rad(30), 0, 0), LeftKnee = CFrame.Angles(rad(-55), 0, 0),
 		RightHip = CFrame.Angles(rad(30), 0, 0), RightKnee = CFrame.Angles(rad(-55), 0, 0), LeftShoulder = CFrame.Angles(rad(20), 0, 0), RightShoulder = CFrame.Angles(rad(20), 0, 0) },
+	-- ankle-breaker collapse (FEEDBACK WAVE 3, 2026-11-02): knees buckle, torso drops and folds, arms out for balance.
+	-- Set by TeamFootballService on the bitten defender for the freeze window, then cleared.
+	collapse = { Root = CFrame.new(0, -0.6, 0), Waist = CFrame.Angles(rad(-35), 0, 0),
+		LeftHip = CFrame.Angles(rad(45), 0, rad(-6)), LeftKnee = CFrame.Angles(rad(-75), 0, 0),
+		RightHip = CFrame.Angles(rad(45), 0, rad(6)), RightKnee = CFrame.Angles(rad(-75), 0, 0),
+		LeftShoulder = CFrame.Angles(rad(20), 0, rad(-70)), RightShoulder = CFrame.Angles(rad(20), 0, rad(70)) },
 }
 local SOCCER = {
 	kick = { RightHip = CFrame.Angles(rad(70), 0, 0), RightKnee = CFrame.Angles(rad(-10), 0, 0), Waist = CFrame.Angles(rad(-10), 0, 0),
@@ -101,6 +141,33 @@ local SOCCER = {
 	cheer = { LeftShoulder = CFrame.Angles(rad(170), 0, rad(-20)), RightShoulder = CFrame.Angles(rad(170), 0, rad(20)) },
 }
 Motion.POSES = { hoops = HOOPS, football = FOOTBALL, soccer = SOCCER }
+
+-- STANCE poses vs ACTION poses (PRE-SNAP WAVE, 2026-11-02).
+-- AthleteMotion layers a pose ON TOP of the animation (`cur * joint.Transform`), so a pose never froze the legs --
+-- but a deep stance applied at full weight to a body already running looks like a man sprinting in a crouch, and the
+-- deeper dbCrouch/snap poses of this wave make that much more visible. Only the poses listed here lose weight with
+-- speed; every pose NOT listed (throw, collapse, reach, shoot, kick, layup, dunk...) always applies at full weight,
+-- because an action has to land whatever the body is doing.
+--   sp    = planar speed in studs/s at which the pose has faded to `floor`
+--   floor = weight it never drops below, for stances that must survive movement (a backpedal still has to look like
+--           a backpedal while backpedaling; the QB's two-hand cradle must survive him shuffling in the pocket)
+-- weight(spStuds) = 1 - (1 - floor) * clamp(spStuds / sp, 0, 1)
+Motion.STANCE_FADE = {
+	["football:wrStance"] = { sp = 6, floor = 0 },
+	["football:dbCrouch"] = { sp = 6, floor = 0 },
+	["football:snap"] = { sp = 5, floor = 0 },
+	["football:rush"] = { sp = 7, floor = 0 },
+	["football:qbSet"] = { sp = 7, floor = 0.25 },
+	["football:qbCarry"] = { sp = 12, floor = 0.55 },  -- the two-hand cradle has to hold while he moves in the pocket
+	["football:pedal"] = { sp = 14, floor = 0.55 },    -- a backpedal pose is only useful while he is backpedaling
+	["football:cover"] = { sp = 9, floor = 0.15 },
+}
+function Motion.stanceWeight(poseKey, spStuds)
+	local f = poseKey and Motion.STANCE_FADE[poseKey]
+	if not f then return 1 end                       -- an action pose, or a stance nobody asked to fade
+	local k = math.clamp((tonumber(spStuds) or 0) / f.sp, 0, 1)
+	return 1 - (1 - f.floor) * k
+end
 
 -- Animation ids in one place. Read today by FootballService:85, HoopsService:96 and Hoops3Modules.Roster
 -- (2026-11-02: was "nothing reads this table yet"). TeamFootballService:134, SoccerService and PracticeService:250

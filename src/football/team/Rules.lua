@@ -1,4 +1,4 @@
--- MIRROR of game.ReplicatedStorage.AWFootball.Rules (ModuleScript), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
+-- MIRROR of game.ReplicatedStorage.AWFootball.Rules (ModuleScript), pulled 2026-11-02 (post wave-3, Gauntlet, DRIP, broadcast UI, stance poses, 2K camera).
 -- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · Football rules core (pure functions). Luau port of football-rules.js. Units: metres, seconds.
 local Rules = {}

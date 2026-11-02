@@ -1,4 +1,4 @@
--- MIRROR of game.ReplicatedStorage.AWFootball.Config (ModuleScript), pulled 2026-11-02 (post feature-wave-2 + ankle-breaker).
+-- MIRROR of game.ReplicatedStorage.AWFootball.Config (ModuleScript), pulled 2026-11-02 (post wave-3, Gauntlet, DRIP, broadcast UI, stance poses, 2K camera).
 -- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
 -- ALLSTAR WORLD · Football 1v1 tunables (Roblox port of the browser build's AW.FOOTBALL_CFG, Milestone 01).
 -- Units are METRES and SECONDS, exactly as in the browser prototype; the services convert to studs with STUD (0.35 m).
@@ -220,7 +220,7 @@ local Config = {
 	-- Sprint (owner feature, 2026-11-02): hold the burst key for +15%, on a short stamina tank so it's a decision,
 	-- not a default. Same rules for AI (carrier + pursuit sprint). Locks out at empty until minToStart recovers.
 	sprint = { mult = 1.15, staminaMax = 3.0, drainRate = 1.0, recoverRate = 0.6, minToStart = 0.8 },
-	ai = { cpuJukeChance = 0.5, cpuTackleAngleError = 0.5 },
+	ai = { cpuJukeChance = 0.75, cpuTackleAngleError = 0.5 }, -- cpuJukeChance was 0.5: AI carriers use their moves more (owner: "see the AI turn up", FEEDBACK WAVE 3, 2026-11-02)
 	-- Stance, snap and release: both sides get the same timing windows off the same HUT. Moving early is a penalty.
 	stance = { cadenceMin = 0.9, cadenceMax = 2.2, perfect = 0.15, good = 0.35, autoRelease = 0.6,
 		perfectBurst = 1.18, goodBurst = 1.08, burstTime = 0.7, falseStartYards = 5, earlyFreeze = 0.5,

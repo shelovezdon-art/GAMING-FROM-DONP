@@ -1,0 +1,2 @@
+-- MIRROR of game.StarterPlayer.StarterPlayerScripts.Hoops3Client (LocalScript), pulled 2026-11-02 (post wave-3, Gauntlet, DRIP, broadcast UI, stance poses, 2K camera).
+-- Studio is the source of truth (docs/practice/ROBLOX-PRACTICE.md §1); this copy is the QA/design record.
