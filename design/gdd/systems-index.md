@@ -25,3 +25,47 @@ Design order: Foundation → Core → Feature → Presentation → Polish
 `football-core.md` § OPEN-DECISIONS lists 3 rule conflicts, 1 naming pass, the
 unvalued scoring/clock knobs, and 7 questions for the owner. Resolve before
 Stage 2 (ball states + passing/catching) is built.
+
+## Audit 2026-11-02
+
+`football-core.md` was rewritten to describe the **existing Roblox build** rather
+than a greenfield spec, after a read-only audit of the live Studio place. Full
+audit trail: `/home/claude/audit/findings.md`. Cached sources:
+`/home/claude/extracted/`.
+
+**Football Core row, corrected:**
+
+| System | Doc | Category | Status | Notes |
+|---|---|---|---|---|
+| Football Core (Practice Field) | [football-core.md](football-core.md) | Core | **Stage 1 + 2 BUILT · Stage 3-5 NOT BUILT** | Practice Field "Ball Lab" (`AWPractice` + `PracticeService` / `PracticeClient`): momentum movement, 5-state ball machine with a `rev` guard, possession claims, three pass types on a deterministic analytic arc, rig-measured deterministic catch model with tips and deflections, server movement validation. **No defender, no tackling, no play cycle, no downs, no score, no AI QB, no route practice, no stamina, no fumbles.** Tackling, juke/spin/stiff-arm, snap cadence, 5 routes, jump balls, downs and an AI QB **do** exist in the older `AWFootball` 1v1 / team modes, which use a different (partly random) catch model. Units are **metres/seconds** (1 stud = 0.35 m), not studs. |
+
+**Supersedes the old row's claims.** It listed tackling, jump balls, the AI QB and
+route practice as part of one planned five-stage build in `DRAFT 1` status with
+"nothing built yet". Two of those four are built, but in a *different* codebase,
+and Stages 1-2 of the Practice Field are built and working.
+
+**Blocking decisions — replaces the section below as it applied to this doc.** The
+old three rule conflicts, the naming pass, the unvalued scoring knobs and the
+Roblox API questions are **resolved**: `AWFootball.Config.rules` supplies
+`possessionsEach 5, downs 4, td 7, startYard 20, otPossessionsEach 1,
+maxOtRounds 3`, and the code's own names and values are now the doc's.
+
+What actually blocks work now (`football-core.md` § OPEN-DECISIONS):
+
+- **A1 — which catch model wins.** Two live models: the Practice Field's fully
+  deterministic one and `AWFootball`'s quality-roll one. The most consequential
+  open decision in the project.
+- **A2 — `Flight.timingGrade` / `catchDifficulty` are dead code** with 11 config
+  keys and no call sites. Wire up or delete.
+- **A4 / A5 — two speed scales** (7.8 vs 9.0-9.6 m/s) and **three gravities**
+  (9.81 / 13.5 / 22).
+- **B1 — griefing bug:** any player can reset the ball mid-flight and destroy
+  another player's pass (`PracticeService:324`).
+- **D — owner's call:** stamina at all? first downs? fumbles? avatar-measured reach
+  as a feature or a fairness problem? Does the Practice Field become a match mode,
+  or hand its modules to `AWFootball`?
+
+**Other systems in the place not yet indexed** (found during the audit, no GDDs):
+`AWHoops` (14 modules — a substantially built basketball core, far beyond "not yet
+specced" below), `AWSoccer` (7 modules), `AWMotion` (shared animation arbitration,
+which Football Core depends on), and the `AWSessions` registry.
