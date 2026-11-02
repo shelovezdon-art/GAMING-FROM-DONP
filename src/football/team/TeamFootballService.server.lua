@@ -1152,7 +1152,7 @@ function G:resolveArrival(forced)
 		self.ball = { holder = wr, air = false }
 		self.passCaught = true -- a completed forward pass: makes this play a "pass" for try legality (Rules.resolveTry)
 		self.carrier = wr; self.phase = "run"
-		wr.st.immuneUntil = 0
+		wr.st.immuneUntil = self.now + (CFG.catch.runAfterCatch or 0) -- was 0: the catcher was wrapped at the catch point before he could move (owner, 2026-11-02)
 		if wr.kind == "ai" then wr.faceHeading = nil end
 		self.stats.catches = (self.stats.catches or 0) + 1
 		self:sendBall()

@@ -172,6 +172,9 @@ local Config = {
 		flightScale = 1.35, maxFlight = 2.5, cpuReaction = 0.12, aggressiveMargin = 0.05 }, -- maxFlight was 1.95: longer jump-ball hang (owner, 2026-11-02)
 	catch = { secureReach = 1.5, aggressiveReach = 2.3, autoReach = 0.9, autoChance = 0.5, windowEarly = 0.5, -- reaches were 1.3/2.1, windowEarly 0.4 (owner catch-feel pass, 2026-11-02)
 		windowLate = 0.22, cpuBase = 0.86, cpuContestedPenalty = 0.4, contestRadius = 1.1, -- windowLate was 0.15
+		-- run-after-catch beat (owner, 2026-11-02): tackle immunity right after a completion so the catcher — human or
+		-- AI — can turn upfield and attempt a move instead of being wrapped at the catch point. ~4 m of free running.
+		runAfterCatch = 0.45,
 		-- Which catch model Rules.resolveCatch uses. "roll" is the shipped quality-roll (0.97/0.80/0.50/0.35,
 		-- untouched above); "deterministic" routes to Rules.judgeCatchDeterministic, which never rolls a die.
 		-- Default stays "roll" until parity is proven in a playtest. Flip this key, nothing else.
