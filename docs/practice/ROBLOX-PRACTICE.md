@@ -127,7 +127,15 @@ spellings of that scale are in use, and they are reciprocals:
 Rules:
 - [ ] Before using an `S`, find where it's defined. **Multiply or divide is decided by the definition, not the name.**
 - [ ] Put units in names when you write new code (`speedMps`, `heightM`, `sizeStuds`). Write `-- m` / `-- studs` on config keys.
-- [ ] Built geometry isn't guaranteed to match the code's scale. The basketball court was built at **3.5 studs/m** while the code converts at **2.857**, so the court and backboard are ~22% oversized. Check built geometry by measuring it (§5).
+- [ ] Built geometry isn't guaranteed to match the code's scale. Check it by measuring (§5).
+  **Corrected 2026-11-02 (re-measured):** the earlier claim here — that the basketball court was built at
+  3.5 studs/m against the code's 2.857 and was therefore ~22% oversized — was **wrong**, and is a cautionary
+  example of the rule it was written for. Every built dimension of `Court_bb-2` divides out at exactly
+  1/0.35 = 2.857 studs/m: surface 98.2286 × 52.2514 studs = 34.380 × 18.288 m, lane 16.7314 = 5.856 m,
+  board 6.5357 = 2.288 m, rim 8.7143 = 3.050 m. The 20% that looked like a scale error is
+  `Geometry.GEO.COURT = 1.2` — a **deliberate** horizontal enlargement over a regulation court, with the rim
+  intentionally left at regulation height. Measuring one ratio and inferring a scale error is how that claim
+  was born; measure the dimensions *and* read what the code expects before calling anything oversized.
 - [ ] Every test output that depends on scale says the unit: `expected=3.05m actual=3.050m (8.714 studs)`.
 
 ---
