@@ -166,12 +166,12 @@ local Config = {
 	},
 
 	qb = { dropbackDepth = 3.0, dropbackTime = 0.8, minReadTime = 1.1, deadline = 3.4, windup = 0.35,
-		throwSpeedMin = 14, throwSpeedMax = 24, accuracy = 0.82, rushedPenalty = 0.9, leadFactor = 0.85 },
-	ball = { gravity = 13.5, catchHeight = 1.25, minFlight = 0.55, maxFlight = 1.6 },
+		throwSpeedMin = 14, throwSpeedMax = 27, accuracy = 0.82, rushedPenalty = 0.9, leadFactor = 0.85 }, -- throwSpeedMax was 24; 27 ≈ the sourced 26.8 m/s elite ceiling (football-ruleset.md §4)
+	ball = { gravity = 13.5, catchHeight = 1.25, minFlight = 0.55, maxFlight = 2.15 }, -- maxFlight was 1.6: owner wants deep balls rewarded (live-tuned + approved 2026-11-02)
 	jump = { highCatchHeight = 2.05, needHeight = 0.55, tightCoverage = 2.2, jumpSpeed = 6.2, gravity = 22,
-		flightScale = 1.35, maxFlight = 1.95, cpuReaction = 0.12, aggressiveMargin = 0.05 },
-	catch = { secureReach = 1.3, aggressiveReach = 2.1, autoReach = 0.9, autoChance = 0.5, windowEarly = 0.4,
-		windowLate = 0.15, cpuBase = 0.86, cpuContestedPenalty = 0.4, contestRadius = 1.1,
+		flightScale = 1.35, maxFlight = 2.5, cpuReaction = 0.12, aggressiveMargin = 0.05 }, -- maxFlight was 1.95: longer jump-ball hang (owner, 2026-11-02)
+	catch = { secureReach = 1.5, aggressiveReach = 2.3, autoReach = 0.9, autoChance = 0.5, windowEarly = 0.5, -- reaches were 1.3/2.1, windowEarly 0.4 (owner catch-feel pass, 2026-11-02)
+		windowLate = 0.22, cpuBase = 0.86, cpuContestedPenalty = 0.4, contestRadius = 1.1, -- windowLate was 0.15
 		-- Which catch model Rules.resolveCatch uses. "roll" is the shipped quality-roll (0.97/0.80/0.50/0.35,
 		-- untouched above); "deterministic" routes to Rules.judgeCatchDeterministic, which never rolls a die.
 		-- Default stays "roll" until parity is proven in a playtest. Flip this key, nothing else.
