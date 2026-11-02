@@ -46,6 +46,23 @@ next playtest with the owner** — the client HUD compiled but was not visually 
 Console after the run: **no errors or warnings from the game flow.** The only two
 errors were the harness's own bad probe (`pos` with no athlete) before the tests.
 
+## Live harness, second pass — game clock (C1–C7) — PASS
+
+| # | Forced situation | Observed |
+|---|---|---|
+| C1 | before any clock test | half 1, clock carried over, running |
+| C2 | after a snap, 1.2 s real time | clock fell 270.38 → 268.87, `started=true stopped=false` |
+| C3 | incomplete OUTSIDE the final window | clock kept falling (268.05 → 267.23), no stop |
+| C4 | incomplete INSIDE the window (set to 45 s) | `stopped=true`, clock frozen at 44.37 across 1 s |
+| C5 | clock expired at a dead ball, half 1 | half 2, fresh 300 s, AWAY receives ("HALFTIME · HALF 2 · AWAY BALL") |
+| C6 | next snap after a window stop | stop cleared, clock running again |
+| C7 | clock expired in half 2, score 0–0 | correctly into "OVERTIME 1 · one possession each" (tie path) |
+| C7b | OT: away TD + try, home turnover on downs | "AWAY WINS · FINAL HOME 0 – 6 AWAY" (win path) |
+
+A complete match therefore runs start to finish: regulation → halftime → regulation end →
+(tie) overtime → FINAL with a winner — the quality bar in the development standard.
+`endPlay` also hardened: a nil `detail` no longer crashes the play-end path.
+
 ## Not yet covered
 
 - Human 1-pt pass try through the real catch path (unit-covered by `Rules.resolveTry`;
