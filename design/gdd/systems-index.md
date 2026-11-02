@@ -8,6 +8,7 @@ Design order: Foundation → Core → Feature → Presentation → Polish
 
 | System | Doc | Category | Status | Notes |
 |---|---|---|---|---|
+| Football ruleset + ball physics | [football-ruleset.md](football-ruleset.md) | Foundation | RESEARCHED 2026-11-02 — IFAF 5v5 base with a labelled contact deviation; 7 owner decisions open |
 | Football Core (Practice Field) | [football-core.md](football-core.md) | Core | DRAFT 1 — open decisions pending | Movement, ball states, passing/catching, tackling, jump balls, 1v1 AI QB, route practice. Server-authoritative. Built in 5 stages. |
 
 ## Not yet specced
