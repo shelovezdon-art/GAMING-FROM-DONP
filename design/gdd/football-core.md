@@ -559,10 +559,13 @@ blank**:
 What `FootballService` actually does with them (lines 342, 860-909):
 
 - Each side gets **5 possessions**, each starting **20 yards** from its own goal.
-- **4 downs, then turnover on downs.** **There are no first downs.** Yards gained
-  are computed and displayed (`Rules.yardsBetween`) but never reset the down
-  counter. A possession is "four plays, then it is the other player's turn."
-  `script_grep "firstDown"` finds nothing engine-wide.
+- **4 downs, then turnover on downs.** **There are no first downs** *in this 1v1
+  service*. Yards gained are computed and displayed (`Rules.yardsBetween`) but never
+  reset the down counter. A possession is "four plays, then it is the other player's
+  turn." **Scope note (2026-11-02): this is a 1v1-only statement** — the team product
+  (`TeamFootballService`, ADR-0001) awards one first down at midfield, formalised as
+  `Rules.isFirstDown` under the IFAF ruleset (football-ruleset.md). Earlier audits
+  over-generalised this line; don't repeat that.
 - **Touchdown = 7.** No kicking, no extra point, **no safety in 1v1**
   (`safety = 2` exists only in `TeamFootballService`'s own local table).
 - Tie after regulation -> up to **3 overtime rounds** of one possession each.
@@ -1479,7 +1482,9 @@ Full tables are in `/home/claude/extracted/AWFootball.Config.lua`. The values th
 matter to this document:
 
 **Match rules** — `possessionsEach 5`, `downs 4`, `td 7`, `startYard 20`,
-`otPossessionsEach 1`, `maxOtRounds 3`. No first downs, no safety, no kicking.
+`otPossessionsEach 1`, `maxOtRounds 3`. No first downs, no safety, no kicking —
+*1v1 legacy block only; the team game uses the IFAF blocks (`rules.td` is 6 there,
+with the declared try — see football-ruleset.md, 2026-11-02).*
 
 **Tackling** — `reach 1.35`, `lungeReach 1.7`, `lungeTime 0.3`, `lungeSpeed 12.5`,
 `whiffRecovery 0.65`, `cooldown 0.9`, `facingCos 0.15`, `jukeImmunity 0.28`,
