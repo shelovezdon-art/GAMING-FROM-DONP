@@ -7,6 +7,17 @@ framework:
   version: 1.2.0
   last_upgraded: 2026-10-19
 
+# Engine: Roblox. This is NOT one of the template's three supported engines
+# (Godot / Unity / Unreal), so the template's engine specialists, code-root
+# rules, test runners and CI commands do not apply here. Game code lives in
+# Roblox Studio (optionally synced to this repo with Rojo); this repo is the
+# design, planning and QA record. Set by the project owner, 2026-11-02.
+engine:
+  name: roblox
+  language: luau
+  code_root: src/          # only if/when Rojo sync is set up; Studio is the source today
+  platform: [roblox-pc, roblox-mobile, roblox-console]
+
 # NOTE: this template ships with no `modes:` block, and the six knobs below must
 # never be added to one.
 #

@@ -5,14 +5,29 @@ Each agent owns a specific domain, enforcing separation of concerns and quality.
 
 ## Technology Stack
 
-- **Engine**: [CHOOSE: Godot 4 / Unity / Unreal Engine 5]
-- **Language**: [CHOOSE: GDScript / C# / C++ / Blueprint]
-- **Version Control**: Git with trunk-based development
-- **Build System**: [SPECIFY after choosing engine]
-- **Asset Pipeline**: [SPECIFY after choosing engine]
+- **Project**: ALLSTAR WORLD (multiplayer sports universe — football first)
+- **Engine**: **Roblox**
+- **Language**: **Luau**
+- **Version Control**: Git with trunk-based development. Game code lives in
+  Roblox Studio; this repo is the design, planning and QA record. Optional Rojo
+  sync can bring scripts into the repo later.
+- **Build System**: Roblox Studio publish (no external build step)
+- **Asset Pipeline**: Roblox Studio — custom meshes, imported FBX/animations,
+  Studio-generated materials
 
-> **Note**: Engine-specialist agents exist for Godot, Unity, and Unreal with
-> dedicated sub-specialists. Use the set matching your engine.
+> **Engine note**: Roblox is NOT one of the three engines this template ships
+> support for. The Godot, Unity and Unreal specialist agents, the engine-specific
+> code-root and test-root rules, the engine reference under
+> `docs/engine-reference/`, and the CI commands in `coding-standards.md` all
+> **do not apply to this project** — ignore them rather than following them.
+>
+> What DOES apply: the design, production, QA and review skills and agents
+> (game-designer, systems-designer, network-programmer, ux-designer,
+> economy-designer, qa-lead, security-engineer, producer, art-director and the
+> rest), the GDD section standards, and the collaboration protocol below.
+>
+> Roblox-specific authority model and module layout for the football core:
+> `design/gdd/football-core.md` §6.
 
 ## Project Structure
 
@@ -25,8 +40,13 @@ Each agent owns a specific domain, enforcing separation of concerns and quality.
      engine, so a Unity or Unreal project stops loading the Godot reference every
      session. It defaults to Godot (the template's example engine); skills that
      need the pinned version read docs/engine-reference/<engine>/VERSION.md on
-     demand regardless of this import. -->
-@docs/engine-reference/godot/VERSION.md
+     demand regardless of this import.
+
+     ROBLOX PROJECT: the import is removed on purpose. Roblox has no pinned
+     version reference here and the Godot snapshot under docs/engine-reference/
+     is unused, so loading it every session would only mislead. Verify uncertain
+     Roblox API behaviour in Studio rather than from memory; the current open API
+     questions are listed in design/gdd/football-core.md section E. -->
 
 
 ## Technical Preferences
